@@ -77,10 +77,22 @@ h2 { font-size: 15px; line-height: 1.7; margin-bottom: 8px; }
 }
 
 /* The replay: a fixed-height terminal viewport, so the page never jumps while it plays. */
-.terminal { margin: 8px 0 14px; padding: 0 18px; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; }
+/* A terminal window: a title bar with its three buttons, then the screen. */
+.terminal {
+  margin: 8px 0 14px; overflow: hidden;
+  background: var(--panel); border: 1px solid #262626; border-radius: 10px;
+  box-shadow: 0 1px 0 #1a1a1a inset, 0 40px 80px -40px rgba(255, 255, 255, .07);
+}
+.titlebar { position: relative; display: flex; align-items: center; height: 34px; padding: 0 13px; background: #121212; border-bottom: 1px solid #1f1f1f; }
+.lights { display: flex; gap: 7px; }
+.lights i { width: 11px; height: 11px; border-radius: 50%; background: #2c2c2c; box-shadow: 0 0 0 .5px #3a3a3a inset; }
+.title { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 12px; color: var(--dim); pointer-events: none; }
+.prompt .path { color: var(--text); font-weight: 600; }
+.prompt .branch { color: var(--dim); }
+.prompt .caret { color: var(--text); }
 /* Lines fade as they scroll off the top; the fade is on the screen inside, so the box keeps its border. */
 .session {
-  height: 470px; overflow: hidden; padding: 16px 0;
+  height: 470px; overflow: hidden; padding: 14px 18px 16px;
   font-size: 13.5px; line-height: 1.6;
   -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 14px);
   mask-image: linear-gradient(to bottom, transparent 0, #000 14px);
@@ -129,8 +141,7 @@ s.tip { color: var(--dim); text-decoration-color: var(--dim); }
   .hero { padding-top: 28px; }
   .install { display: flex; align-items: flex-start; }
   .install code { white-space: normal; }
-  .terminal { padding: 0 12px; }
-  .session { height: 430px; padding: 12px 0; font-size: 12px; }
+  .session { height: 430px; padding: 12px; font-size: 12px; }
   .pairs li { grid-template-columns: 1fr; gap: 4px; }
   .pairs .to { display: none; }
   .help div { grid-template-columns: 1fr; gap: 2px; }

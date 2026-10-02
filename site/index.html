@@ -48,7 +48,10 @@
   </div>
 
   <aside class="demo">
-    <div class="terminal"><div class="session" data-session aria-label="A replay of a real run: three Reviewers block a commit, then pass its fix"></div></div>
+    <div class="terminal">
+      <div class="titlebar" aria-hidden="true"><span class="lights"><i></i><i></i><i></i></span><span class="title">acme-store · zsh</span></div>
+      <div class="session" data-session aria-label="A replay of a real run: three Reviewers block a commit, then pass its fix"></div>
+    </div>
   </aside>
   </div>
 
@@ -175,15 +178,17 @@
     return element;
   }
 
+  const PROMPT = '<span class="prompt"><span class="path">~/acme-store</span> <span class="branch">main</span> <span class="caret">❯</span></span> ';
+
   async function type(text) {
-    const element = line('<span class="dim">$</span> ');
+    const element = line(PROMPT);
     const cursor = '<span class="cursor"></span>';
     for (let index = 0; index <= text.length; index += 1) {
-      element.innerHTML = `<span class="dim">$</span> ${escape(text.slice(0, index))}${cursor}`;
+      element.innerHTML = `${PROMPT}${escape(text.slice(0, index))}${cursor}`;
       await wait(24 + Math.random() * 34);
     }
     await wait(320);
-    element.innerHTML = `<span class="dim">$</span> ${escape(text)}`;
+    element.innerHTML = `${PROMPT}${escape(text)}`;
   }
 
   async function judge(reviewers) {
@@ -229,7 +234,7 @@
         }
         await wait(2400);
       }
-      const end = line('<span class="cursor"></span>');
+      const end = line(`${PROMPT}<span class="cursor"></span>`);
       if (reduced) return;
       await wait(5000);
       end.remove();
