@@ -55,8 +55,14 @@
         <p><span class="dim">$</span> reviewers</p>
         <ul class="pairs">
           <li><q>why is this called usr? spell it out</q><span class="to">→</span><span class="rule"><span class="green">●</span> Spell out names</span></li>
-          <li><q>never show error.message to the user, map it to copy</q><span class="to">→</span><span class="rule"><span class="green">●</span> Errors reach users through the error map</span></li>
+          <li><q>never show error.message, map it to copy</q><span class="to">→</span><span class="rule"><span class="green">●</span> Errors reach users through the error map</span></li>
           <li><q>stop casting the API response, validate it</q><span class="to">→</span><span class="rule"><span class="green">●</span> No type casts</span></li>
+          <li><q>only comment what the code can't say</q><span class="to">→</span><span class="rule"><span class="green">●</span> Comments only where code can't say it</span></li>
+          <li><q>why is one function doing two things?</q><span class="to">→</span><span class="rule"><span class="green">●</span> One function answers one question</span></li>
+          <li><q>these tests aren't proving anything</q><span class="to">→</span><span class="rule"><span class="green">●</span> Tests prove behavior that matters</span></li>
+          <li><q>what if the storefront priced it wrong?</q><span class="to">→</span><span class="rule"><span class="green">●</span> Server re-prices every checkout line</span></li>
+          <li><q>users aren't developers, hide the json</q><span class="to">→</span><span class="rule"><span class="green">●</span> No developer content in user UI</span></li>
+          <li><q>module A never touches module B's tables</q><span class="to">→</span><span class="rule"><span class="green">●</span> Modules keep out of each other's tables</span></li>
         </ul>
       </div>
     </div>
