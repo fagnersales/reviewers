@@ -34,8 +34,8 @@ code { font: inherit; }
 
 .masthead, .rail, .colophon { max-width: 960px; margin: 0 auto; padding-left: 32px; padding-right: 32px; }
 .masthead { display: flex; justify-content: space-between; align-items: center; padding-top: 28px; padding-bottom: 8px; }
-.wordmark { color: var(--text); text-decoration: none; font-weight: 700; }
-.corner { color: var(--rail); font-weight: 400; }
+.wordmark { display: block; color: var(--text); line-height: 0; }
+.wordmark svg { height: 24px; width: auto; }
 .masthead nav, .colophon nav { display: flex; gap: 24px; }
 .masthead nav a, .colophon nav a { color: var(--dim); text-decoration: none; }
 .masthead nav a:hover, .colophon nav a:hover, nav a[aria-current] { color: var(--text); }

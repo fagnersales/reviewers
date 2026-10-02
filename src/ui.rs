@@ -12,6 +12,8 @@ pub const STEP_ACTIVE: &str = "◆";
 pub const STEP_DONE: &str = "◇";
 pub const STEP_CANCEL: &str = "■";
 pub const SPINNER: [&str; 4] = ["◒", "◐", "◓", "◑"];
+/// The logo, as text: a selected box, the same mark the site and the favicon use.
+pub const LOGO: &str = "[◆]";
 
 pub fn stdout_is_tty() -> bool {
     std::io::stdout().is_terminal()

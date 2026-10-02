@@ -740,7 +740,7 @@ pub fn run(args: OnboardArgs) -> Outcome {
         std::process::exit(130);
     });
 
-    ui::intro(&format!("{} {}", ui::bold("reviewers"), ui::dim("· first run")));
+    ui::intro(&format!("{} {}", ui::bold(&format!("{} reviewers", ui::LOGO)), ui::dim("· first run")));
     let spinner = ui::Spinner::start("Reading your agent sessions");
     let progress = |done: usize, total: usize| {
         if done % 50 == 0 || done == total {
