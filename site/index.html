@@ -132,7 +132,7 @@
       ["", ""],
       ["", '  <span class="cyan">src/api/users.ts:5-6</span>'],
       ["", '    <span class="dim">const body = await getJson(`/users/${id}`);</span>'],
-      ["", '    <span class="dim">  return body as User;</span>'],
+      ["", '    <span class="dim">return body as User;</span>'],
       ["", "  → `body as User` is a type assertion applied to unvalidated data from an API call. It should instead be validated at the boundary (e.g. a schema parse like `UserSchema.parse(body)` or a type guard `isUser(body)`) so the `User` type is derived from an actual runtime check rather than asserted."],
       ["", ""],
       ["", "Fix the code above and commit again. Full reasoning: `reviewers run run_621e9069a4eea96d2cf6`."],

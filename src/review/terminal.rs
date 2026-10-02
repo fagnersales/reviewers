@@ -74,8 +74,10 @@ pub fn report(run: &Run, paint: &Paint) -> String {
         for evidence in &decision.evidence {
             lines.push(String::new());
             lines.push(format!("  {}", paint.cyan(&location(evidence))));
-            for excerpt in evidence.excerpt.lines().filter(|line| !line.trim().is_empty()) {
-                lines.push(format!("    {}", paint.dim(excerpt.trim_end())));
+            let quoted = crate::diff::find_quote(&run.diff, &evidence.file, &evidence.excerpt)
+                .unwrap_or_else(|| evidence.excerpt.lines().filter(|line| !line.trim().is_empty()).map(str::to_string).collect());
+            for line in crate::diff::dedent(&quoted) {
+                lines.push(format!("    {}", paint.dim(&line)));
             }
             lines.push(format!("  → {}", evidence.explanation));
         }
