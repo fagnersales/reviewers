@@ -157,19 +157,20 @@ pub fn commit_msg(message_file: Option<&str>) -> i32 {
         return EXIT_APPROVED;
     }
     let attempted = message_file.and_then(|file| git::attempted_message(&root.join(file)));
+    let paint = review::terminal::Paint::for_stderr();
     eprintln!("reviewers: checking {} at once…", crate::util::plural(reviewers.len(), "Reviewer"));
     let started_at = crate::util::now_iso();
     let started = Instant::now();
     let judged = review::judge_all(&store, &project, reviewers, &diff, &root, &mut |judged| match &judged.outcome {
         Ok(decision) => {
-            let mark = if decision.verdict == crate::store::Verdict::Approved { "✓" } else { "✗" };
-            eprintln!("  {mark} {} ({})", judged.reviewer.name, crate::util::duration(decision.duration_ms));
+            let mark = if decision.verdict == crate::store::Verdict::Approved { paint.green("✓") } else { paint.red("✗") };
+            eprintln!("  {mark} {} {}", judged.reviewer.name, paint.dim(&crate::util::duration(decision.duration_ms)));
         }
-        Err(_) => eprintln!("  ! {} (no verdict)", judged.reviewer.name),
+        Err(_) => eprintln!("  {} {} {}", paint.yellow("!"), judged.reviewer.name, paint.dim("no verdict")),
     });
     match review::record(&mut store, &project, RunKind::Review, judged, &diff, attempted, started_at, started) {
         Ok(reviewed) => {
-            eprintln!("{}", review::terminal::report(&reviewed.run));
+            eprintln!("{}", review::terminal::report(&reviewed.run, &paint));
             reviewed.exit_code
         }
         Err(error) => {

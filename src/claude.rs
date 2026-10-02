@@ -80,6 +80,44 @@ fn name_field() -> &'static Regex {
     NAME.get_or_init(|| Regex::new(r#""name"\s*:\s*"((?:[^"\\]|\\.)*)""#).expect("the pattern compiles"))
 }
 
+/// A model that closes a tool parameter with the wrong tag (`</reasoning>` for
+/// `</parameter>`) leaves every parameter after it inside that string:
+/// `"…text.</reasoning>\n<parameter name="verdict">approved"`. The values are
+/// all there; this moves them back out into their own fields.
+pub fn recover_leaked_parameters(output: Value) -> Value {
+    static PARAMETER: OnceLock<Regex> = OnceLock::new();
+    static TRAILING_TAG: OnceLock<Regex> = OnceLock::new();
+    let parameter = PARAMETER.get_or_init(|| Regex::new(r#"<parameter name="([^"]+)">"#).expect("the pattern compiles"));
+    let trailing_tag = TRAILING_TAG.get_or_init(|| Regex::new(r"\s*</[a-z_]+>\s*$").expect("the pattern compiles"));
+    let Value::Object(mut fields) = output else {
+        return output;
+    };
+    let mut leaked: Vec<(String, String)> = Vec::new();
+    for value in fields.values_mut() {
+        let Value::String(text) = value else {
+            continue;
+        };
+        let Some(first) = parameter.find(text) else {
+            continue;
+        };
+        let tail = text[first.start()..].to_string();
+        *value = Value::String(trailing_tag.replace(&text[..first.start()], "").trim().to_string());
+        let markers: Vec<_> = parameter.captures_iter(&tail).map(|capture| (capture[1].to_string(), capture.get(0).map(|m| (m.start(), m.end())).unwrap_or_default())).collect();
+        for (index, (name, (_, end))) in markers.iter().enumerate() {
+            let stop = markers.get(index + 1).map(|(_, (start, _))| *start).unwrap_or(tail.len());
+            let raw = tail[*end..stop].replace("</parameter>", "");
+            leaked.push((name.clone(), trailing_tag.replace(raw.trim(), "").trim().to_string()));
+        }
+    }
+    for (name, raw) in leaked {
+        if !fields.contains_key(&name) {
+            let parsed = serde_json::from_str::<Value>(&raw).unwrap_or(Value::String(raw));
+            fields.insert(name, parsed);
+        }
+    }
+    Value::Object(fields)
+}
+
 fn decode_json_string(raw: &str) -> String {
     serde_json::from_str::<String>(&format!("\"{raw}\"")).unwrap_or_else(|_| raw.to_string())
 }
@@ -164,10 +202,16 @@ pub fn run(request: &Request, on_activity: &mut dyn FnMut(Activity)) -> Result<O
     }
 
     let started = Instant::now();
+    // `REVIEWERS_TRACE_DIR=/some/dir` keeps every raw stream, for when a run ends without an answer.
+    let mut trace = std::env::var_os("REVIEWERS_TRACE_DIR").and_then(|dir| {
+        std::fs::create_dir_all(&dir).ok()?;
+        std::fs::File::create(PathBuf::from(dir).join(format!("{}-{pid}.jsonl", crate::util::now_iso().replace(':', "-")))).ok()
+    });
     let mut lines: Vec<(String, Value)> = Vec::new();
     let mut result: Option<Value> = None;
     let mut model: Option<String> = None;
     let mut answer: Option<String> = None;
+    let mut last_attempt: Option<Value> = None;
     let mut named = 0usize;
     let mut finished = Tokens::default();
     let mut current = Tokens::default();
@@ -175,6 +219,9 @@ pub fn run(request: &Request, on_activity: &mut dyn FnMut(Activity)) -> Result<O
     loop {
         match receiver.recv_timeout(Duration::from_millis(200)) {
             Ok(line) => {
+                if let Some(file) = trace.as_mut() {
+                    let _ = writeln!(file, "{line}");
+                }
                 let Ok(event) = serde_json::from_str::<Value>(&line) else {
                     continue;
                 };
@@ -226,7 +273,12 @@ pub fn run(request: &Request, on_activity: &mut dyn FnMut(Activity)) -> Result<O
                         if let Some(parts) = event["message"]["content"].as_array() {
                             for part in parts {
                                 let name = str_field(part, "name").unwrap_or_default();
-                                if str_field(part, "type") == Some("tool_use") && name != "StructuredOutput" {
+                                if str_field(part, "type") != Some("tool_use") {
+                                    continue;
+                                }
+                                if name == "StructuredOutput" {
+                                    last_attempt = Some(part["input"].clone());
+                                } else {
                                     on_activity(Activity::Tool { name: name.to_string(), input: part["input"].clone() });
                                 }
                             }
@@ -263,8 +315,15 @@ pub fn run(request: &Request, on_activity: &mut dyn FnMut(Activity)) -> Result<O
         let code = status.ok().and_then(|status| status.code()).unwrap_or(-1);
         return Err(format!("claude exited {code}: {detail}"));
     };
-    let is_error = result["is_error"].as_bool() == Some(true) || str_field(&result, "subtype").is_some_and(|subtype| subtype != "success");
-    let output = result.get("structured_output").cloned().unwrap_or(Value::Null);
+    let subtype = str_field(&result, "subtype").unwrap_or("success");
+    let mut output = result.get("structured_output").cloned().unwrap_or(Value::Null);
+    // The CLI gives up after a few answers that miss its schema on a technicality; the caller validates the last one itself.
+    let gave_up_on_schema = subtype == "error_max_structured_output_retries" && output.is_null() && last_attempt.is_some();
+    if gave_up_on_schema {
+        output = last_attempt.take().unwrap_or(Value::Null);
+    }
+    let output = recover_leaked_parameters(output);
+    let is_error = !gave_up_on_schema && (result["is_error"].as_bool() == Some(true) || subtype != "success");
     if is_error || output.is_null() {
         let detail = str_field(&result, "result").map(str::to_string).unwrap_or_else(|| stderr.trim().to_string());
         let first_line = detail.lines().next().unwrap_or("no structured answer").chars().take(300).collect::<String>();
@@ -383,4 +442,21 @@ fn session_from(lines: &[(String, Value)], prompt: &str, root: &Path) -> Vec<Val
         session.push(json!({ "kind": "tool", "timestamp": at, "name": name, "detail": detail, "input": input, "isError": name != "StructuredOutput", "output": "(no result)" }));
     }
     session
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn moves_swallowed_parameters_back_out() {
+        let fumbled = json!({
+            "evidence": [],
+            "reasoning": "All names are full words.</reasoning>\n<parameter name=\"summary\">No abbreviations.</parameter>\n<parameter name=\"verdict\">approved"
+        });
+        let recovered = recover_leaked_parameters(fumbled);
+        assert_eq!(recovered["reasoning"], "All names are full words.");
+        assert_eq!(recovered["summary"], "No abbreviations.");
+        assert_eq!(recovered["verdict"], "approved");
+    }
 }

@@ -21,10 +21,18 @@ pub struct StructuredDecision {
     pub evidence: Vec<Evidence>,
 }
 
+/// A model that fumbles its tool call can leave the next parameter's markup inside a string.
+fn without_leaked_markup(text: &str) -> &str {
+    text.split("</parameter>").next().unwrap_or(text).trim()
+}
+
 pub fn parse_decision(output: &Value) -> Result<StructuredDecision, String> {
     let verdict = output["verdict"].as_str().and_then(Verdict::parse).ok_or("the answer has no verdict")?;
-    let text = |key: &str| output[key].as_str().map(str::trim).filter(|text| !text.is_empty()).map(str::to_string);
-    let evidence: Vec<Evidence> = serde_json::from_value(output["evidence"].clone()).map_err(|error| format!("the evidence is malformed: {error}"))?;
+    let text = |key: &str| output[key].as_str().map(without_leaked_markup).filter(|text| !text.is_empty()).map(str::to_string);
+    let evidence: Vec<Evidence> = match &output["evidence"] {
+        Value::Null => Vec::new(),
+        value => serde_json::from_value(value.clone()).map_err(|error| format!("the evidence is malformed: {error}"))?,
+    };
     if verdict == Verdict::Blocked && evidence.is_empty() {
         return Err("a blocked verdict came without evidence".into());
     }
@@ -176,4 +184,17 @@ pub fn record(store: &mut Store, project: &Project, kind: RunKind, judged: Vec<J
         EXIT_APPROVED
     };
     Ok(Reviewed { run, exit_code })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reads_a_verdict_whose_tool_call_went_wrong() {
+        let fumbled = json!({ "verdict": "approved", "summary": "No abbreviations.", "reasoning": "All names are full words.</parameter>\n<parameter name=\"evidence\">[]" });
+        let decision = parse_decision(&fumbled).expect("an approval needs no evidence");
+        assert_eq!(decision.reasoning, "All names are full words.");
+        assert!(parse_decision(&json!({ "verdict": "blocked", "summary": "x", "reasoning": "y" })).is_err());
+    }
 }

@@ -52,7 +52,8 @@ pub fn decision_schema() -> Value {
                 }
             }
         },
-        "required": ["verdict", "summary", "reasoning", "evidence"]
+        // Evidence is checked in code (a block needs it): some models fumble an empty required list and retry until they give up.
+        "required": ["verdict", "summary", "reasoning"]
     })
 }
 

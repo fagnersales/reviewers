@@ -36,17 +36,30 @@ struct RuleEvidence {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Rule {
+    #[serde(default)]
     repo: String,
     name: String,
     instruction: String,
+    #[serde(default)]
     why: String,
+    #[serde(default = "seen_once")]
     times_seen: u32,
+    #[serde(default)]
     stated: bool,
+    #[serde(default)]
     general: bool,
+    #[serde(default)]
     paths: Vec<String>,
+    #[serde(default)]
     lintable: bool,
+    #[serde(default)]
     lint_rule: String,
+    #[serde(default)]
     evidence: Vec<RuleEvidence>,
+}
+
+fn seen_once() -> u32 {
+    1
 }
 
 #[derive(Clone, Serialize)]
