@@ -39,6 +39,14 @@
   <section class="step" data-step>
     <span class="marker" aria-hidden="true"></span>
     <div class="body">
+      <h2>Why not a lint rule?</h2>
+      <p class="dim">I built this because I'm not sure a lint rule is enough for a given situation, so a generic approach (using agents) is much easier for me. If you're comfortable with lint rules, you're better off not using Reviewers at all.</p>
+    </div>
+  </section>
+
+  <section class="step" data-step>
+    <span class="marker" aria-hidden="true"></span>
+    <div class="body">
       <h2>A commit, judged</h2>
       <p class="dim">Every Reviewer that applies runs at once, each as its own read-only Claude Code session. When one blocks, the agent gets the file, the lines and the fix.</p>
       <div class="session" data-session aria-label="A replay of a real run: three Reviewers block a commit, then pass its fix"></div>
@@ -77,14 +85,6 @@
         <div><dt>reviewers stats</dt><dd>What each rule catches, the wait it adds and the tokens it uses.</dd></div>
         <div><dt>the skill</dt><dd>Claude Code, <s class="tip" tabindex="0" data-tip="Not tested yet">Codex, Cursor, OpenCode</s> read <a href="/docs/">reviewers help --agent</a>.</dd></div>
       </dl>
-    </div>
-  </section>
-
-  <section class="step" data-step>
-    <span class="marker" aria-hidden="true"></span>
-    <div class="body">
-      <h2>Why not a lint rule?</h2>
-      <p class="dim">I built this because I'm not sure a lint rule is enough for a given situation, so a generic approach (using agents) is much easier for me. If you're comfortable with lint rules, you're better off not using Reviewers at all.</p>
     </div>
   </section>
 
