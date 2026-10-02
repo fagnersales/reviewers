@@ -104,8 +104,11 @@ h2 { font-size: 15px; line-height: 1.7; margin-bottom: 8px; }
 .tip:hover::after, .tip:focus::after { opacity: 1; }
 s.tip { color: var(--dim); text-decoration-color: var(--dim); }
 
-.colophon { padding-top: 8px; padding-bottom: 48px; }
+.colophon { max-width: none; display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px 24px; padding-top: 8px; padding-bottom: 48px; }
 .colophon nav { padding-left: var(--gutter); }
+.credit { margin: 0; color: var(--dim); }
+.credit a { color: var(--dim); text-decoration-color: var(--faint); }
+.credit a:hover { color: var(--text); }
 
 @media (max-width: 720px) {
   body { font-size: 14px; }
@@ -119,6 +122,7 @@ s.tip { color: var(--dim); text-decoration-color: var(--dim); }
   .pairs li { grid-template-columns: 1fr; gap: 4px; }
   .pairs .to { display: none; }
   .help div { grid-template-columns: 1fr; gap: 2px; }
+  .credit { padding-left: var(--gutter); }
 }
 
 @media (prefers-reduced-motion: reduce) { .cursor { animation: none; } html { scroll-behavior: auto; } }
