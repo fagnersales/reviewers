@@ -3,117 +3,17 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>reviewers - Your rules, checked on every commit your agent makes</title>
-<meta name="description" content="A commit gate for coding agents. Each Reviewer is one rule you hold about code, checked on every commit.">
-<link rel="preload" href="/fonts/geist-mono-latin.woff2" as="font" type="font/woff2" crossorigin>
-<style>
-  @font-face {
-    font-family: "Geist Mono";
-    src: url("/fonts/geist-mono-latin.woff2") format("woff2");
-    font-weight: 400 700;
-    font-display: swap;
-  }
-  :root {
-    --bg: #000;
-    --text: #ededed;
-    --muted: #a1a1a1;
-    --faint: #6e6e6e;
-    --line: #262626;
-    --green: #4ade80;
-    --red: #f87171;
-    --yellow: #facc15;
-    --cyan: #67e8f9;
-    color-scheme: dark;
-  }
-  * { box-sizing: border-box; }
-  html, body { margin: 0; background: var(--bg); }
-  body {
-    font: 14px/21px "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
-    color: var(--muted);
-    -webkit-font-smoothing: antialiased;
-    min-height: 100vh;
-    display: flex;
-    flex-direction: column;
-  }
-  a { color: var(--text); text-decoration: underline; text-decoration-color: var(--line); text-underline-offset: 4px; }
-  a:hover { text-decoration-color: var(--muted); }
-  code { font: inherit; color: var(--text); }
-
-  header { height: 64px; padding: 0 32px; display: flex; align-items: center; gap: 40px; }
-  .brand { display: flex; align-items: center; gap: 10px; color: var(--text); text-decoration: none; font-weight: 700; }
-  .brand svg { display: block; }
-  nav { display: flex; gap: 28px; }
-  nav a, footer a { color: var(--muted); text-decoration: none; }
-  nav a:hover, footer a:hover { color: var(--text); }
-
-  main { padding: 56px 32px 96px; flex: 1; }
-  h1 { font: inherit; color: var(--muted); margin: 0 0 14px; }
-  .install { display: flex; align-items: center; gap: 10px; color: var(--text); margin: 0 0 14px; white-space: nowrap; }
-  .install code { font-weight: 600; cursor: pointer; }
-  .copy { background: none; border: 0; padding: 2px; color: var(--faint); cursor: pointer; display: inline-flex; }
-  .copy:hover { color: var(--text); }
-  .copy[data-copied]::after { content: "copied"; font-size: 13px; margin-left: 6px; color: var(--muted); }
-  .meta { font-size: 13px; line-height: 19.5px; margin: 0; }
-  .meta strong { color: var(--text); font-weight: 400; }
-
-  .tip { position: relative; cursor: help; }
-  .tip::after {
-    content: attr(data-tip); position: absolute; left: 50%; bottom: calc(100% + 8px); transform: translateX(-50%);
-    width: max-content; max-width: 280px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px;
-    background: #0a0a0a; color: var(--text); font-size: 12px; line-height: 18px; white-space: normal;
-    opacity: 0; pointer-events: none; transition: opacity .12s; z-index: 2;
-  }
-  .tip:hover::after, .tip:focus::after { opacity: 1; }
-  .untested { color: var(--faint); text-decoration-color: var(--faint); }
-  /* Hidden tooltips still count toward the page's width; anchoring them right keeps them off the edge. */
-  .meta .tip::after { left: auto; right: 0; transform: none; max-width: min(280px, 80vw); }
-
-  .terminal { width: 680px; max-width: 100%; margin: 40px 0 48px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); overflow: hidden; }
-  .bar { position: relative; height: 44px; display: flex; align-items: center; padding: 0 18px; }
-  .dots { display: flex; gap: 8px; }
-  .dots span { width: 12px; height: 12px; border-radius: 50%; background: rgba(161, 161, 161, .6); }
-  .bar .title { position: absolute; left: 0; right: 0; text-align: center; pointer-events: none; }
-  .bar .tip { margin-left: auto; }
-  .bar .tip::after { left: auto; right: 0; transform: none; }
-  .screen {
-    height: 420px; overflow-y: auto; scrollbar-width: none; padding: 4px 16px 16px;
-    white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text); font-size: 13px; line-height: 20px;
-  }
-  .screen::-webkit-scrollbar { display: none; }
-  .prompt { color: var(--muted); }
-  .comment { color: var(--faint); }
-  .cursor { display: inline-block; width: 8px; height: 15px; vertical-align: -2px; background: var(--text); animation: blink 1s steps(1) infinite; }
-  @keyframes blink { 50% { opacity: 0; } }
-  .b { font-weight: 700; } .d { color: var(--faint); }
-  .red { color: var(--red); } .green { color: var(--green); } .yellow { color: var(--yellow); } .cyan { color: var(--cyan); }
-
-  .prose { max-width: 600px; }
-  .prose p { line-height: 24.5px; margin: 0 0 21px; }
-  .sep { margin: 48px 0 56px; letter-spacing: 2px; }
-  .features { max-width: 560px; }
-  .feature { margin: 0 0 41px; }
-  .feature h2 { font: inherit; font-weight: 700; color: var(--text); margin: 0 0 4px; }
-  .feature p { line-height: 24.5px; margin: 0; }
-
-  footer { padding: 0 32px 36px; display: flex; justify-content: flex-end; gap: 14px; }
-
-  @media (max-width: 640px) {
-    header { padding: 0 20px; justify-content: space-between; }
-    nav { gap: 14px; }
-    main { padding: 40px 20px 72px; }
-    .install { font-size: 13px; align-items: flex-start; white-space: normal; }
-    .install code { min-width: 0; }
-    .screen { height: 380px; font-size: 12px; line-height: 18px; }
-    footer { padding: 0 20px 32px; }
-  }
-  @media (prefers-reduced-motion: reduce) { .cursor { animation: none; } }
-</style>
+<title>reviewers · your rules, on every commit</title>
+<meta name="description" content="Reviewers turns what you keep telling your coding agent into checks it can't skip. When a commit breaks a rule, the agent gets the line and the fix, and tries again.">
+<link rel="preload" href="/fonts/instrument-serif-normal-400.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/fonts/jetbrains-mono-normal-400.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/style.css">
 </head>
 <body>
-<header>
-  <a class="brand" href="/" aria-label="reviewers home">
-    <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1 15 8 8 15 1 8Z" fill="currentColor"/></svg>
-    reviewers
+<header class="masthead">
+  <a class="wordmark" href="/" aria-label="reviewers home">
+    <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true"><path d="M3 9.5 7 13.5 15 4.5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    <span>reviewers</span>
   </a>
   <nav>
     <a href="/docs/">docs</a>
@@ -123,155 +23,207 @@
 </header>
 
 <main>
-  <h1>Your rules, checked on every commit your agent makes.</h1>
-  <p class="install">
-    <span>$</span>
-    <code id="command" title="Copy">curl -fsSL https://reviewers.sh/install | sh</code>
-    <button class="copy" id="copy" type="button" aria-label="Copy the install command">
-      <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/><path d="M10.5 3.5v-.5A1.5 1.5 0 0 0 9 1.5H3A1.5 1.5 0 0 0 1.5 3v6A1.5 1.5 0 0 0 3 10.5h.5"/></svg>
-    </button>
-  </p>
-  <p class="meta">
-    <span id="version">v0.1.0</span> · <span id="size">5.87mib</span> · status: <strong>experimental</strong>
-    <span class="tip" tabindex="0" data-tip="Runs on your own Claude Code. Commands and storage may still change before 1.0.">(i)</span>
-  </p>
-
-  <section class="terminal" aria-label="A recording of Reviewers on two commits">
-    <div class="bar">
-      <div class="dots"><span></span><span></span><span></span></div>
-      <div class="title" id="title">acme-store</div>
-      <span class="tip" tabindex="0" id="note" data-tip="A real recording.">(i)</span>
+  <section class="hero">
+    <p class="kicker">A commit gate for coding agents</p>
+    <h1>Your rules, on <em>every</em> commit.</h1>
+    <p class="lede">Reviewers turns what you keep telling your coding agent into checks it can't skip. When a commit breaks a rule, the agent gets the line and the fix, and tries again.</p>
+    <div class="install" data-install>
+      <code><span class="prompt">$</span> curl -fsSL https://reviewers.sh/install | sh</code>
+      <button type="button" data-copy>Copy</button>
     </div>
-    <div class="screen" id="screen"></div>
+    <p class="fineprint"><span id="version">v0.1.0</span> · <span class="size-text">6.2 MB</span> · macOS and Linux · runs on your Claude Code · experimental</p>
   </section>
 
-  <div class="prose">
-    <p>reviewers is a commit gate for coding agents, written in Rust. Each Reviewer is one rule you hold about code, judged on every commit by its own read-only Claude Code session.</p>
-    <p>When a rule is broken, the commit stops and the agent gets the file, the lines and what to do instead. It fixes the code and commits again, without you.</p>
-    <p>The first run reads your Claude Code sessions, finds the rules you keep repeating to your agents, and turns them into Reviewers.</p>
-    <p>It runs on your own Claude Code, keeps everything on your machine, and is a single <span class="size-text">5.87 MiB</span> binary.</p>
-  </div>
+  <section class="run" aria-labelledby="run-title" data-run data-attempt="1">
+    <div class="section-head">
+      <h2 id="run-title" class="label">A real run</h2>
+      <div class="attempts" role="tablist" aria-label="Attempts">
+        <button type="button" role="tab" data-show="1" aria-selected="true"><span class="num">1</span> Stopped</button>
+        <button type="button" role="tab" data-show="2" aria-selected="false"><span class="num">2</span> Fixed</button>
+      </div>
+    </div>
 
-  <div class="sep" aria-hidden="true">* * *</div>
+    <div class="run-grid">
+      <figure class="diff" data-for="1">
+        <figcaption><span class="file">src/api/users.ts</span><span class="badge">new file</span></figcaption>
+        <ol>
+          <li><code><span class="k">import</span> { getJson } <span class="k">from</span> <span class="s">"./client"</span>;</code></li>
+          <li><code><span class="k">import type</span> { User } <span class="k">from</span> <span class="s">"./types"</span>;</code></li>
+          <li><code></code></li>
+          <li><code><span class="k">export async function</span> fetchUser(id: string): Promise&lt;User&gt; {</code></li>
+          <li class="marked"><code>  <span class="k">const</span> body = <span class="k">await</span> getJson(<span class="s">`/users/${id}`</span>);</code></li>
+          <li class="marked" data-anchor><code>  <span class="k">return</span> body <span class="k">as</span> User;</code></li>
+          <li><code>}</code></li>
+        </ol>
+      </figure>
+      <aside class="note blocked" data-for="1">
+        <p class="note-title">✗ No type casts</p>
+        <p><code>body as User</code> is a type assertion applied to unvalidated data from an API call. It should instead be validated at the boundary (e.g. a schema parse like <code>UserSchema.parse(body)</code> or a type guard <code>isUser(body)</code>) so the <code>User</code> type is derived from an actual runtime check rather than asserted.</p>
+        <p class="note-meta">users.ts:5–6, as the agent read it</p>
+      </aside>
 
-  <div class="features">
-    <section class="feature">
-      <h2>Rules you already hold</h2>
-      <p>The first run reads 90 days of your sessions in parallel and turns your corrections into Reviewers, with your own words as evidence.</p>
-    </section>
-    <section class="feature">
-      <h2>Every Reviewer at once</h2>
-      <p>The Reviewers that apply to a commit run in parallel. A commit waits for the slowest one, not for all of them in a row.</p>
-    </section>
-    <section class="feature">
-      <h2>Written for the agent</h2>
-      <p>A block names the file, the lines and the fix, so the agent that made the commit can correct it on its own.</p>
-    </section>
-    <section class="feature">
-      <h2>Personal and project rules</h2>
-      <p>Some rules follow you into every repo, others belong to one codebase. Scope a Reviewer to paths and it only runs when they change.</p>
-    </section>
-    <section class="feature">
-      <h2>Tested like code</h2>
-      <p>Pin real diffs as cases and run <code>reviewers eval</code> until the instruction judges them right. Every version keeps its score.</p>
-    </section>
-    <section class="feature">
-      <h2>Measured</h2>
-      <p><code>reviewers stats</code> shows what each Reviewer catches, the wait it adds and the tokens it uses, so you can retire the ones that never block.</p>
-    </section>
-    <section class="feature">
-      <h2>Agents know how to use it</h2>
-      <p>The installer gives Claude Code, <s class="tip untested" tabindex="0" data-tip="Not tested yet">Codex, Cursor and OpenCode</s> a skill that points to <a href="/docs/">reviewers help --agent</a>, which updates with every release.</p>
-    </section>
-    <section class="feature">
-      <h2>Tiny native binary</h2>
-      <p>One <span class="size-text">5.87 MiB</span> binary that starts in 3 ms. No server, no background process.</p>
-    </section>
-  </div>
+      <figure class="diff" data-for="2">
+        <figcaption><span class="file">src/api/users.ts</span><span class="badge">second try</span></figcaption>
+        <ol>
+          <li><code><span class="k">import</span> { getJson } <span class="k">from</span> <span class="s">"./client"</span>;</code></li>
+          <li><code><span class="k">import type</span> { User } <span class="k">from</span> <span class="s">"./types"</span>;</code></li>
+          <li class="added"><code><span class="k">import</span> { AppError } <span class="k">from</span> <span class="s">"../errors"</span>;</code></li>
+          <li><code></code></li>
+          <li class="added" data-anchor><code><span class="k">function</span> isUser(value: unknown): value <span class="k">is</span> User {</code></li>
+          <li class="added"><code>  <span class="k">return</span> (</code></li>
+          <li class="added"><code>    <span class="k">typeof</span> value === <span class="s">"object"</span> &amp;&amp; value !== <span class="k">null</span> &amp;&amp;</code></li>
+          <li class="added"><code>    <span class="s">"id"</span> <span class="k">in</span> value &amp;&amp; <span class="k">typeof</span> value.id === <span class="s">"string"</span> &amp;&amp;</code></li>
+          <li class="added"><code>    <span class="s">"name"</span> <span class="k">in</span> value &amp;&amp; <span class="k">typeof</span> value.name === <span class="s">"string"</span> &amp;&amp;</code></li>
+          <li class="added"><code>    <span class="s">"email"</span> <span class="k">in</span> value &amp;&amp; <span class="k">typeof</span> value.email === <span class="s">"string"</span></code></li>
+          <li class="added"><code>  );</code></li>
+          <li class="added"><code>}</code></li>
+          <li><code></code></li>
+          <li><code><span class="k">export async function</span> fetchUser(id: string): Promise&lt;User&gt; {</code></li>
+          <li><code>  <span class="k">const</span> body = <span class="k">await</span> getJson(<span class="s">`/users/${id}`</span>);</code></li>
+          <li class="added"><code>  <span class="k">if</span> (!isUser(body)) {</code></li>
+          <li class="added"><code>    <span class="k">throw new</span> AppError(<span class="s">"UNEXPECTED_RESPONSE"</span>);</code></li>
+          <li class="added"><code>  }</code></li>
+          <li class="added"><code>  <span class="k">return</span> body;</code></li>
+          <li><code>}</code></li>
+        </ol>
+      </figure>
+      <aside class="note passed" data-for="2">
+        <p class="note-title">✓ Committed</p>
+        <p>The agent read the block, validated the response instead of casting it, and committed again. All three Reviewers passed, and the commit landed as <code>e510e3d</code>.</p>
+        <p class="note-meta">No one had to look at it</p>
+      </aside>
+      <ul class="verdicts" data-for="1">
+        <li><span class="mark ok">✓</span> Errors reach users through the error map <span class="time">7s</span></li>
+        <li><span class="mark no">✗</span> No type casts <span class="time">8s</span></li>
+        <li><span class="mark ok">✓</span> Spell out names <span class="time">16s</span></li>
+        <li class="total">Commit stopped · 16s · 55k tokens</li>
+      </ul>
+      <ul class="verdicts" data-for="2">
+        <li><span class="mark ok">✓</span> No type casts <span class="time">9s</span></li>
+        <li><span class="mark ok">✓</span> Errors reach users through the error map <span class="time">9s</span></li>
+        <li><span class="mark ok">✓</span> Spell out names <span class="time">10s</span></li>
+        <li class="total">Committed · 10s · 44k tokens</li>
+      </ul>
+    </div>
+
+    <p class="caption">Recorded on a small repo with three Reviewers, on Claude Sonnet. The words in the margin are the Reviewer's own.</p>
+  </section>
+
+  <section class="origin">
+    <h2 class="title">It starts with what you've already said.</h2>
+    <p class="body">The first run reads 90 days of your Claude Code sessions. Every correction you kept repeating becomes a Reviewer, with your own words kept as its evidence.</p>
+    <ol class="pairs">
+      <li>
+        <blockquote>“why is this called usr? spell it out”</blockquote>
+        <span class="arrow" aria-hidden="true">→</span>
+        <div class="rule"><strong>Spell out names</strong><span>Block abbreviations like <code>usr</code>, <code>cfg</code>, <code>btn</code>. A name says what the value holds.</span></div>
+      </li>
+      <li>
+        <blockquote>“never show error.message to the user, map it to copy”</blockquote>
+        <span class="arrow" aria-hidden="true">→</span>
+        <div class="rule"><strong>Errors reach users through the error map</strong><span>Block an error's own text reaching a person. Throw a typed code instead.</span></div>
+      </li>
+      <li>
+        <blockquote>“stop casting the API response, validate it”</blockquote>
+        <span class="arrow" aria-hidden="true">→</span>
+        <div class="rule"><strong>No type casts</strong><span>Block <code>as</code> on data nobody checked. Validate it where it comes in.</span></div>
+      </li>
+    </ol>
+    <p class="caption">Examples. Yours come from your own sessions.</p>
+  </section>
+
+  <section class="steps">
+    <h2 class="title">What happens on a commit</h2>
+    <ol>
+      <li><span class="step">1</span><div><strong>Your agent commits.</strong><p>A git hook takes the staged change.</p></div></li>
+      <li><span class="step">2</span><div><strong>Every rule that applies judges it at once.</strong><p>Each Reviewer is its own read-only Claude Code session. The commit waits for the slowest one, not for all of them in a row.</p></div></li>
+      <li><span class="step">3</span><div><strong>A broken rule stops the commit.</strong><p>The agent gets the file, the lines and the fix, corrects the code and commits again. You hear about it only if you ask.</p></div></li>
+    </ol>
+  </section>
+
+  <section class="numbers" aria-labelledby="numbers-title">
+    <h2 id="numbers-title" class="label">In real use</h2>
+    <dl>
+      <div><dt>commits judged</dt><dd>1,135</dd></div>
+      <div><dt>verdicts</dt><dd>6,406</dd></div>
+      <div><dt>commits stopped by a rule</dt><dd>1 in 5</dd></div>
+      <div><dt>of blocks fixed by the agent on its own</dt><dd>93%</dd></div>
+    </dl>
+    <p class="caption">Five weeks of one developer's daily use, Aug 26 to Oct 2, 2026.</p>
+  </section>
+
+  <section class="details">
+    <h2 class="title">Also</h2>
+    <dl>
+      <div><dt>Personal and project rules</dt><dd>Some rules follow you into every repo. Others belong to one codebase, or to one folder of it.</dd></div>
+      <div><dt>Tested like code</dt><dd>Pin real diffs as cases, run <code>reviewers eval</code>, and tune the wording until every case passes.</dd></div>
+      <div><dt>Measured</dt><dd><code>reviewers stats</code> shows what each rule catches, the wait it adds and the tokens it uses.</dd></div>
+      <div><dt>Your agent knows how</dt><dd>A skill tells Claude Code, <s class="tip" tabindex="0" data-tip="Not tested yet">Codex, Cursor and OpenCode</s> to read <a href="/docs/">reviewers help --agent</a>, which changes with every release.</dd></div>
+      <div><dt>Small and local</dt><dd>One <span class="size-text">6.2 MB</span> binary that starts in 3 ms. It runs on your own Claude Code, and everything stays on your machine.</dd></div>
+    </dl>
+  </section>
+
+  <section class="closing">
+    <h2 class="title">Install it.</h2>
+    <div class="install" data-install>
+      <code><span class="prompt">$</span> curl -fsSL https://reviewers.sh/install | sh</code>
+      <button type="button" data-copy>Copy</button>
+    </div>
+    <p class="fineprint">Then run <code>reviewers</code> in a terminal. It reads your sessions and asks which repos and which model to use before anything runs.</p>
+  </section>
 </main>
 
-<footer>
-  <a href="/docs/">docs</a>
-  <a href="/install">install</a>
-  <a href="/llms.txt">llms.txt</a>
+<footer class="colophon">
+  <a class="wordmark small" href="/"><svg width="14" height="14" viewBox="0 0 18 18" aria-hidden="true"><path d="M3 9.5 7 13.5 15 4.5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>reviewers</span></a>
+  <nav><a href="/docs/">docs</a><a href="/install">install</a><a href="/llms.txt">llms.txt</a></nav>
 </footer>
 
 <script>
-  const command = document.getElementById("command");
-  const copyButton = document.getElementById("copy");
-  const copy = async () => {
-    await navigator.clipboard.writeText(command.textContent);
-    copyButton.setAttribute("data-copied", "");
-    setTimeout(() => copyButton.removeAttribute("data-copied"), 1400);
-  };
-  command.addEventListener("click", copy);
-  copyButton.addEventListener("click", copy);
+  for (const install of document.querySelectorAll("[data-install]")) {
+    const button = install.querySelector("[data-copy]");
+    button.addEventListener("click", async () => {
+      await navigator.clipboard.writeText(install.querySelector("code").textContent.replace(/^\$\s*/, ""));
+      button.textContent = "Copied";
+      setTimeout(() => (button.textContent = "Copy"), 1400);
+    });
+  }
 
-  // Replays a real terminal recording: SGR colors only, which is all the hook prints.
-  const screen = document.getElementById("screen");
+  // The run shows the first attempt, then the fix. It moves on by itself until someone picks an attempt.
+  const run = document.querySelector("[data-run]");
+  const tabs = run.querySelectorAll("[data-show]");
   const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
-  const CLASSES = { 1: "b", 2: "d", 31: "red", 32: "green", 33: "yellow", 36: "cyan" };
-  let style = [];
-  const sleep = (ms) => (reduced ? Promise.resolve() : new Promise((resolve) => setTimeout(resolve, ms)));
-  const cursor = document.createElement("span");
-  cursor.className = "cursor";
+  let picked = false;
 
-  function append(text, classes = []) {
-    const span = document.createElement("span");
-    if (classes.length) span.className = classes.join(" ");
-    span.textContent = text;
-    screen.insertBefore(span, cursor);
-    screen.scrollTop = screen.scrollHeight;
-  }
-
-  function appendAnsi(text) {
-    for (const part of text.split(/(\x1b\[[0-9;]*m)/)) {
-      const match = part.match(/^\x1b\[([0-9;]*)m$/);
-      if (!match) {
-        if (part) append(part, style);
-        continue;
-      }
-      for (const code of (match[1] || "0").split(";").map(Number)) {
-        if (code === 0) style = [];
-        else if (CLASSES[code]) style = [...style.filter((c) => !["red", "green", "yellow", "cyan"].includes(c) || code < 30), CLASSES[code]];
-      }
+  function alignNotes() {
+    for (const note of run.querySelectorAll(".note")) {
+      const diff = run.querySelector(`.diff[data-for="${note.dataset.for}"]`);
+      const anchor = diff.querySelector("[data-anchor]");
+      note.style.marginTop = matchMedia("(min-width: 1080px)").matches ? `${anchor.offsetTop - 6}px` : "";
     }
   }
 
-  async function play(script) {
-    document.getElementById("title").textContent = script.title;
-    document.getElementById("note").dataset.tip = script.note;
-    for (;;) {
-      screen.textContent = "";
-      screen.append(cursor);
-      for (const step of script.steps) {
-        if (step.type === "command") {
-          append("$ ", ["prompt"]);
-          for (const character of step.text) {
-            append(character);
-            await sleep(28 + Math.random() * 40);
-          }
-          await sleep(350);
-          append("\n");
-        } else if (step.type === "comment") {
-          append("\n" + step.text + "\n", ["comment"]);
-          await sleep(900);
-        } else if (step.type === "output") {
-          for (const [delay, text] of step.events) {
-            await sleep(delay);
-            appendAnsi(text);
-          }
-        } else if (step.type === "pause") {
-          await sleep(step.ms);
-        }
-      }
-      if (reduced) return;
-    }
+  function show(attempt) {
+    run.dataset.attempt = attempt;
+    for (const tab of tabs) tab.setAttribute("aria-selected", String(tab.dataset.show === attempt));
+    alignNotes();
   }
 
-  fetch("/demo.json").then((response) => response.json()).then(play).catch(() => {
-    screen.textContent = "$ git commit -m \"Fetch users from the API\"";
-  });
+  for (const tab of tabs) {
+    tab.addEventListener("click", () => {
+      picked = true;
+      show(tab.dataset.show);
+    });
+  }
+  addEventListener("resize", alignNotes);
+  document.fonts.ready.then(alignNotes);
+
+  if (!reduced) {
+    let visible = false;
+    new IntersectionObserver(([entry]) => (visible = entry.isIntersecting), { threshold: 0.4 }).observe(run);
+    setInterval(() => {
+      if (!picked && visible) show(run.dataset.attempt === "1" ? "2" : "1");
+    }, 7000);
+  }
 </script>
 </body>
 </html>

@@ -9,7 +9,7 @@ cd "$(dirname "$0")/.."
 cargo build --release --quiet
 binary=target/release/reviewers
 version=$("$binary" --version | awk '{ print $2 }')
-size=$(wc -c <"$binary" | awk '{ printf "%.2f", $1 / 1048576 }')
+size=$(wc -c <"$binary" | awk '{ printf "%.1f MB", $1 / 1000000 }')
 
 cp install.sh site/install
 {
@@ -24,8 +24,7 @@ cp site/docs.md site/llms.txt
 # The homepage states the version and size of the binary it installs.
 sed -i.bak \
   -e "s|<span id=\"version\">[^<]*</span>|<span id=\"version\">v$version</span>|" \
-  -e "s|<span id=\"size\">[^<]*</span>|<span id=\"size\">${size}mib</span>|" \
-  -e "s|<span class=\"size-text\">[^<]*</span>|<span class=\"size-text\">$size MiB</span>|g" \
+  -e "s|<span class=\"size-text\">[^<]*</span>|<span class=\"size-text\">$size</span>|g" \
   site/index.html
 rm -f site/index.html.bak
-echo "site/ is ready: v$version, $size MiB"
+echo "site/ is ready: v$version, $size"
