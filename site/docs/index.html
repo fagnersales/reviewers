@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>docs - reviewers</title>
+<link rel="preload" href="/fonts/geist-mono-latin.woff2" as="font" type="font/woff2" crossorigin>
+<style>
+  @font-face { font-family: "Geist Mono"; src: url("/fonts/geist-mono-latin.woff2") format("woff2"); font-weight: 400 700; font-display: swap; }
+  :root { --text: #ededed; --muted: #a1a1a1; --line: #262626; color-scheme: dark; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: #000; }
+  body { font: 14px/21px "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--muted); -webkit-font-smoothing: antialiased; }
+  a { color: var(--text); text-decoration: underline; text-decoration-color: var(--line); text-underline-offset: 4px; }
+  header { height: 64px; padding: 0 32px; display: flex; align-items: center; gap: 40px; }
+  .brand { display: flex; align-items: center; gap: 10px; color: var(--text); text-decoration: none; font-weight: 700; }
+  nav { display: flex; gap: 28px; }
+  nav a { color: var(--muted); text-decoration: none; }
+  nav a:hover, nav a[aria-current] { color: var(--text); }
+  main { padding: 56px 32px 96px; max-width: 664px; }
+  h1, h2, h3, h4 { font: inherit; font-weight: 700; color: var(--text); margin: 40px 0 8px; }
+  h1 { margin-top: 0; }
+  p, li { line-height: 24.5px; }
+  p { margin: 0 0 16px; }
+  ul, ol { margin: 0 0 16px; padding-left: 22px; }
+  code { font: inherit; color: var(--text); }
+  pre { margin: 0 0 16px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 8px; overflow-x: auto; color: var(--text); }
+  strong { color: var(--text); }
+  @media (max-width: 640px) { header { padding: 0 20px; justify-content: space-between; } main { padding: 40px 20px 72px; } }
+</style>
+</head>
+<body>
+<header>
+  <a class="brand" href="/"><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1 15 8 8 15 1 8Z" fill="currentColor"/></svg>reviewers</a>
+  <nav><a href="/docs/" aria-current="page">docs</a><a href="/install">install</a><a href="/llms.txt">llms.txt</a></nav>
+</header>
+<main id="docs">Loading…</main>
+<script>
+  // The same guide `reviewers help --agent` prints, so the site and the agents read one text.
+  const escape = (text) => text.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+  const inline = (text) =>
+    escape(text)
+      .replace(/`([^`]+)`/g, "<code>$1</code>")
+      .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+      .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>');
+
+  function render(markdown) {
+    const out = [];
+    let paragraph = [], list = null, fence = null;
+    const flush = () => {
+      if (paragraph.length) out.push(`<p>${inline(paragraph.join(" "))}</p>`);
+      paragraph = [];
+      if (list) out.push(`</${list}>`);
+      list = null;
+    };
+    for (const line of markdown.split("\n")) {
+      if (fence !== null) {
+        if (line.startsWith("```")) { out.push(`<pre>${escape(fence.join("\n"))}</pre>`); fence = null; } else fence.push(line);
+        continue;
+      }
+      if (line.startsWith("```")) { flush(); fence = []; continue; }
+      const heading = line.match(/^(#{1,4}) (.*)$/);
+      if (heading) { flush(); out.push(`<h${heading[1].length}>${inline(heading[2])}</h${heading[1].length}>`); continue; }
+      const item = line.match(/^\s*(?:[-*]|(\d+)\.) (.*)$/);
+      if (item) {
+        if (paragraph.length) { out.push(`<p>${inline(paragraph.join(" "))}</p>`); paragraph = []; }
+        const kind = item[1] ? "ol" : "ul";
+        if (list !== kind) { if (list) out.push(`</${list}>`); out.push(`<${kind}>`); list = kind; }
+        out.push(`<li>${inline(item[2])}</li>`);
+        continue;
+      }
+      if (!line.trim()) { flush(); continue; }
+      if (list && /^\s+/.test(line)) { out[out.length - 1] = out[out.length - 1].replace(/<\/li>$/, ` ${inline(line.trim())}</li>`); continue; }
+      paragraph.push(line.trim());
+    }
+    flush();
+    return out.join("\n");
+  }
+
+  fetch("/docs.md").then((response) => response.text()).then((text) => { document.getElementById("docs").innerHTML = render(text); });
+</script>
+</body>
+</html>

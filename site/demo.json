@@ -1,0 +1,84 @@
+{
+ "title": "acme-store",
+ "note": "A real recording: three Reviewers on a small repo, running on Claude Sonnet. Waits are shortened.",
+ "steps": [
+  {
+   "type": "command",
+   "text": "git commit -m \"Fetch users from the API\""
+  },
+  {
+   "type": "output",
+   "events": [
+    [
+     306,
+     "reviewers: checking 3 Reviewers at once…\n"
+    ],
+    [
+     1600,
+     "  \u001b[32m✓\u001b[0m Errors reach users through the error map \u001b[2m7s\u001b[0m\n"
+    ],
+    [
+     900,
+     "  \u001b[31m✗\u001b[0m No type casts \u001b[2m8s\u001b[0m\n"
+    ],
+    [
+     900,
+     "  \u001b[32m✓\u001b[0m Spell out names \u001b[2m16s\u001b[0m\n"
+    ],
+    [
+     2,
+     "reviewers: \u001b[31mblocked by 1 of 3 Reviewers\u001b[0m \u001b[2m· 16s · 55k tokens\u001b[0m\n\n\u001b[31m✗\u001b[0m \u001b[1mNo type casts\u001b[0m\n  The new `fetchUser` function uses a type assertion (`body as User`) to cast unvalidated network response data instead of validating it at the boundary.\n\n  \u001b[36msrc/api/users.ts:5-6\u001b[0m\n    \u001b[2mconst body = await getJson(`/users/${id}`);\u001b[0m\n    \u001b[2m  return body as User;\u001b[0m\n  → `body as User` is a type assertion applied to unvalidated data from an API call. It should instead be validated at the boundary (e.g. a schema parse like `UserSchema.parse(body)` or a type guard `isUser(body)`) so the `User` type is derived from an actual runtime check rather than asserted.\n\nFix the code above and commit again. Full reasoning: `reviewers run run_621e9069a4eea96d2cf6`.\n"
+    ]
+   ]
+  },
+  {
+   "type": "pause",
+   "ms": 2200
+  },
+  {
+   "type": "comment",
+   "text": "# the agent validates the response instead, and commits again"
+  },
+  {
+   "type": "command",
+   "text": "git commit -m \"Fetch users from the API\""
+  },
+  {
+   "type": "output",
+   "events": [
+    [
+     21,
+     "reviewers: checking 3 Reviewers at once…\n"
+    ],
+    [
+     1600,
+     "  \u001b[32m✓\u001b[0m No type casts \u001b[2m9s\u001b[0m\n"
+    ],
+    [
+     396,
+     "  \u001b[32m✓\u001b[0m Errors reach users through the error map \u001b[2m9s\u001b[0m\n"
+    ],
+    [
+     558,
+     "  \u001b[32m✓\u001b[0m Spell out names \u001b[2m10s\u001b[0m\n"
+    ],
+    [
+     3,
+     "reviewers: \u001b[32m3 Reviewers passed\u001b[0m \u001b[2m· 10s · 44k tokens\u001b[0m\n"
+    ],
+    [
+     39,
+     "[main e510e3d] Fetch users from the API\n"
+    ],
+    [
+     0,
+     " 1 file changed, 21 insertions(+)\n create mode 100644 src/api/users.ts\n"
+    ]
+   ]
+  },
+  {
+   "type": "pause",
+   "ms": 7000
+  }
+ ]
+}
