@@ -89,11 +89,6 @@ h2 { font-size: 15px; line-height: 1.7; margin-bottom: 8px; }
 .pairs q::after { content: "”"; }
 .pairs .to { color: var(--magenta); }
 
-.stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 24px; margin: 0; }
-.stats div { display: flex; flex-direction: column; }
-.stats dd { margin: 0; font-size: 32px; line-height: 1.2; font-weight: 700; }
-.stats dt { color: var(--dim); font-size: 13px; line-height: 1.5; margin-top: 6px; }
-
 .help { margin: 8px 0 0; display: grid; gap: 14px; }
 .help div { display: grid; grid-template-columns: 24ch minmax(0, 1fr); gap: 24px; }
 .help dt { color: var(--cyan); }
@@ -123,7 +118,6 @@ s.tip { color: var(--dim); text-decoration-color: var(--dim); }
   .session { height: 430px; padding: 12px; font-size: 12px; }
   .pairs li { grid-template-columns: 1fr; gap: 4px; }
   .pairs .to { display: none; }
-  .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .help div { grid-template-columns: 1fr; gap: 2px; }
 }
 
