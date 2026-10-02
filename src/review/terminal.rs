@@ -51,12 +51,13 @@ pub fn report(run: &Run, paint: &Paint) -> String {
     let tokens: u64 = run.decisions.iter().map(|decision| decision.usage.tokens_read + decision.usage.tokens_written).sum();
     let footer = paint.dim(&format!("· {} · {} tokens", duration(run.duration_ms), compact(tokens)));
     let blocked: Vec<_> = run.decisions.iter().filter(|decision| decision.verdict == Verdict::Blocked).collect();
+    let blocked_before = blocked.iter().any(|decision| decision.reused_from.is_some());
     let mut lines = Vec::new();
     if let Some(failure) = &run.failure {
         lines.push(format!("{PREFIX} {}", paint.yellow("could not reach a verdict, so the commit is stopped")));
         lines.extend(failure.lines().map(|line| format!("  {line}")));
         lines.push(String::new());
-        lines.push(format!("Try the commit again. If it keeps failing: `reviewers run {}`.", run.id));
+        lines.push(format!("Try the commit again: only the Reviewers without a verdict run again. If it keeps failing: `reviewers run {}`.", run.id));
         return lines.join("\n");
     }
     if blocked.is_empty() {
@@ -80,6 +81,9 @@ pub fn report(run: &Run, paint: &Paint) -> String {
         }
     }
     lines.push(String::new());
+    if blocked_before {
+        lines.push("The code and the Reviewer are unchanged since the last try, so it gave the same verdict without running again.".into());
+    }
     lines.push(format!("Fix the code above and commit again. Full reasoning: `reviewers run {}`.", run.id));
     lines.join("\n")
 }

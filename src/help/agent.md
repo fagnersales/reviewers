@@ -7,11 +7,11 @@ You are the one who fixes, adds and tunes Reviewers. The person states rules; yo
 ## When a commit is blocked
 
 1. Read the hook output: every block names the file, the lines and what to do.
-2. Fix the code, stage it, and commit again with the same message.
+2. Fix the code, stage it, and commit again with the same message. Committing the same diff again gets the same verdicts back without running: only a change to the code or to the Reviewer is judged anew.
 3. If a block makes no sense, read the Reviewer's full reasoning: `reviewers run <run-id> --json` (the id is in the hook output). If the Reviewer is wrong, fix the Reviewer rather than working around it: capture the diff as an `approved` case and tune the instruction (`reviewers help evals`).
 4. Never bypass with `--no-verify` or `REVIEWERS_BYPASS=1` unless the person asks.
 
-A commit that ends "could not reach a verdict" means a Reviewer crashed or timed out, not that the code is wrong. Retry once; if it fails again, tell the person.
+A commit that ends "could not reach a verdict" means a Reviewer crashed or timed out, not that the code is wrong. Retry once: only the Reviewers without a verdict run again. If it fails again, tell the person.
 
 ## When the person states a rule
 

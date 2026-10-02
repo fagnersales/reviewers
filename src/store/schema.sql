@@ -78,10 +78,16 @@ CREATE TABLE decisions (
   tokens_read INTEGER NOT NULL DEFAULT 0,
   tokens_written INTEGER NOT NULL DEFAULT 0,
   turns INTEGER NOT NULL DEFAULT 0,
-  tool_calls INTEGER NOT NULL DEFAULT 0
+  tool_calls INTEGER NOT NULL DEFAULT 0,
+  -- A hash of exactly what the Reviewer was asked (prompt, model, schema).
+  -- The same input gets the earlier verdict back without running: then
+  -- `reused_from` is the run that judged it, and this row cost no tokens.
+  input_hash TEXT,
+  reused_from TEXT
 );
 CREATE INDEX decisions_run ON decisions(run_id);
 CREATE INDEX decisions_reviewer ON decisions(reviewer_id, run_id);
+CREATE INDEX decisions_input ON decisions(input_hash);
 
 CREATE TABLE cases (
   id TEXT PRIMARY KEY,

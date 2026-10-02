@@ -120,11 +120,17 @@ pub fn show(id: &str, with_session: bool, json_output: bool) -> Outcome {
             "\n{mark} {} {}",
             ui::bold(&decision.reviewer_name),
             ui::dim(&format!(
-                "v{} · {} · {} tokens · {} tool calls{}",
+                "v{} · {}{}",
                 decision.reviewer_version,
-                duration(decision.duration_ms),
-                compact(decision.usage.tokens_read + decision.usage.tokens_written),
-                decision.usage.tool_calls,
+                match &decision.reused_from {
+                    Some(run) => format!("unchanged since {run}, verdict given back"),
+                    None => format!(
+                        "{} · {} tokens · {} tool calls",
+                        duration(decision.duration_ms),
+                        compact(decision.usage.tokens_read + decision.usage.tokens_written),
+                        decision.usage.tool_calls
+                    ),
+                },
                 decision.model.as_ref().map(|model| format!(" · {model}")).unwrap_or_default()
             ))
         );
@@ -137,7 +143,10 @@ pub fn show(id: &str, with_session: bool, json_output: bool) -> Outcome {
             println!("  {}{line}  {}", ui::cyan(&evidence.file), ui::dim(&evidence.explanation));
         }
         if with_session {
-            print_session(&decision.session);
+            match &decision.reused_from {
+                Some(run) => println!("  {}", ui::dim(&format!("Its session: `reviewers run {run} --session`"))),
+                None => print_session(&decision.session),
+            }
         }
     }
     if !with_session {

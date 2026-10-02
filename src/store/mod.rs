@@ -12,7 +12,15 @@ fn db_error(error: rusqlite::Error) -> String {
 }
 
 const SCHEMA: &str = include_str!("schema.sql");
-const SCHEMA_VERSION: i64 = 1;
+const SCHEMA_VERSION: i64 = 2;
+
+/// Each step takes a database from the version before it to the next one.
+const MIGRATIONS: &[(i64, &str)] = &[(
+    2,
+    "ALTER TABLE decisions ADD COLUMN input_hash TEXT;
+     ALTER TABLE decisions ADD COLUMN reused_from TEXT;
+     CREATE INDEX decisions_input ON decisions(input_hash);",
+)];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -168,6 +176,11 @@ pub struct Decision {
     pub model: Option<String>,
     pub duration_ms: u64,
     pub usage: Usage,
+    #[serde(skip)]
+    pub input_hash: Option<String>,
+    /// The run whose verdict this is, when the same input was judged there and the verdict was given back instead of running again.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reused_from: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -315,10 +328,17 @@ impl Store {
             self.connection
                 .execute_batch(&format!("PRAGMA user_version = {SCHEMA_VERSION}"))
                 .map_err(db_error)?;
-        } else if version > SCHEMA_VERSION {
+            return Ok(());
+        }
+        if version > SCHEMA_VERSION {
             return Err(format!(
                 "this database was written by a newer reviewers (schema {version}); run `reviewers upgrade`"
             ));
+        }
+        for (target, statements) in MIGRATIONS.iter().filter(|(target, _)| *target > version) {
+            self.connection
+                .execute_batch(&format!("BEGIN; {statements} PRAGMA user_version = {target}; COMMIT;"))
+                .map_err(db_error)?;
         }
         Ok(())
     }
@@ -677,8 +697,8 @@ impl Store {
             transaction
                 .execute(
                     "INSERT OR IGNORE INTO decisions (id, run_id, reviewer_id, reviewer_name, reviewer_version, instruction, verdict, summary, reasoning,
-                       evidence, session, model, duration_ms, tokens_read, tokens_written, turns, tool_calls)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
+                       evidence, session, model, duration_ms, tokens_read, tokens_written, turns, tool_calls, input_hash, reused_from)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)",
                     params![
                         decision.id,
                         run.id,
@@ -696,7 +716,9 @@ impl Store {
                         decision.usage.tokens_read as i64,
                         decision.usage.tokens_written as i64,
                         decision.usage.turns,
-                        decision.usage.tool_calls
+                        decision.usage.tool_calls,
+                        decision.input_hash,
+                        decision.reused_from
                     ],
                 )
                 .map_err(db_error)?;
@@ -731,7 +753,23 @@ impl Store {
                 turns: row.get::<_, i64>("turns")? as u32,
                 tool_calls: row.get::<_, i64>("tool_calls")? as u32,
             },
+            input_hash: row.get("input_hash")?,
+            reused_from: row.get("reused_from")?,
         })
+    }
+
+    /// The latest verdict a commit review in this repo reached on exactly this input.
+    pub fn judged_before(&self, project_id: &str, input_hash: &str) -> Result<Option<Decision>> {
+        self.connection
+            .query_row(
+                "SELECT d.* FROM decisions d JOIN runs r ON r.id = d.run_id
+                 WHERE r.project_id = ?1 AND r.kind = 'review' AND d.input_hash = ?2
+                 ORDER BY r.started_at DESC LIMIT 1",
+                [project_id, input_hash],
+                |row| Store::decision_row(row, true),
+            )
+            .optional()
+            .map_err(db_error)
     }
 
     fn run_row(row: &Row, with_diff: bool) -> rusqlite::Result<Run> {
@@ -825,7 +863,7 @@ impl Store {
         rows.collect::<rusqlite::Result<Vec<_>>>().map_err(db_error)
     }
 
-    /// Commit-hook runs only; per Reviewer.
+    /// Commit-hook runs only, per Reviewer, counting only verdicts that ran (not ones given back for the same input).
     pub fn reviewer_records(&self, project_id: Option<&str>, since: Option<&str>) -> Result<Vec<ReviewerRecord>> {
         let mut statement = self
             .connection
@@ -835,7 +873,7 @@ impl Store {
                    count(*) AS runs, sum(d.verdict = 'blocked') AS blocked, avg(d.duration_ms) AS avg_ms,
                    sum(d.tokens_read) AS tokens_read, sum(d.tokens_written) AS tokens_written
                  FROM decisions d JOIN runs r ON r.id = d.run_id
-                 WHERE r.kind = 'review' AND (?1 IS NULL OR r.project_id = ?1) AND (?2 IS NULL OR r.started_at >= ?2)
+                 WHERE r.kind = 'review' AND d.reused_from IS NULL AND (?1 IS NULL OR r.project_id = ?1) AND (?2 IS NULL OR r.started_at >= ?2)
                  GROUP BY d.reviewer_id ORDER BY tokens_read + tokens_written DESC",
             )
             .map_err(db_error)?;
@@ -1066,4 +1104,33 @@ impl Store {
 
 pub fn new_decision_id() -> String {
     new_id("dec")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn upgrades_a_schema_1_database() {
+        let directory = std::env::temp_dir().join(new_id("reviewers-test"));
+        let path = directory.join("reviewers.sqlite");
+        Store::open(&path)
+            .unwrap()
+            .connection()
+            .execute_batch(
+                "DROP INDEX decisions_input;
+                 ALTER TABLE decisions DROP COLUMN input_hash;
+                 ALTER TABLE decisions DROP COLUMN reused_from;
+                 PRAGMA user_version = 1;",
+            )
+            .unwrap();
+        let store = Store::open(&path).unwrap();
+        let version: i64 = store.connection().query_row("PRAGMA user_version", [], |row| row.get(0)).unwrap();
+        assert_eq!(version, SCHEMA_VERSION);
+        assert!(store.judged_before("prj_none", "hash").unwrap().is_none());
+        drop(store);
+        // Opening it again is a no-op, not a second migration.
+        assert!(Store::open(&path).is_ok());
+        let _ = std::fs::remove_dir_all(&directory);
+    }
 }

@@ -164,7 +164,11 @@ pub fn commit_msg(message_file: Option<&str>) -> i32 {
     let judged = review::judge_all(&store, &project, reviewers, &diff, &root, &mut |judged| match &judged.outcome {
         Ok(decision) => {
             let mark = if decision.verdict == crate::store::Verdict::Approved { paint.green("✓") } else { paint.red("✗") };
-            eprintln!("  {mark} {} {}", judged.reviewer.name, paint.dim(&crate::util::duration(decision.duration_ms)));
+            let timing = match &decision.reused_from {
+                Some(run) => format!("unchanged since {run}"),
+                None => crate::util::duration(decision.duration_ms),
+            };
+            eprintln!("  {mark} {} {}", judged.reviewer.name, paint.dim(&timing));
         }
         Err(_) => eprintln!("  {} {} {}", paint.yellow("!"), judged.reviewer.name, paint.dim("no verdict")),
     });
