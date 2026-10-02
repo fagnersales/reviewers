@@ -1,5 +1,5 @@
 use crate::review::{self, EXIT_APPROVED, EXIT_FAILED};
-use crate::store::{Project, RunKind, StampResult, Store};
+use crate::store::{Project, RunKind, Store};
 use crate::{diff, git, scope};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
@@ -214,9 +214,4 @@ pub fn describe(state: HookState) -> &'static str {
         HookState::Foreign => "left alone: another tool's hook is there",
         HookState::Workspace => "left alone: Personal Workspace's hook is there",
     }
-}
-
-#[allow(dead_code)]
-pub fn stamped(result: &StampResult) -> bool {
-    matches!(result, StampResult::Stamped { .. } | StampResult::AlreadyStamped)
 }

@@ -1,6 +1,10 @@
 # What happens on a commit
 
-`reviewers init` registers a repo and installs two git hooks, honoring `core.hooksPath` (husky, lefthook). A hook another tool already owns is left alone.
+`reviewers init` registers a repo and installs two git hooks, honoring `core.hooksPath` (husky, lefthook). A hook another tool already owns is left alone; to run Reviewers from it, add this line to that tool's `commit-msg` hook:
+
+```sh
+reviewers hook commit-msg "$1"
+```
 
 - **commit-msg** takes the staged diff and runs every enabled Reviewer whose scope and `--paths` match, all at once. Each is a read-only Claude Code session in the repo: it can open any file, but can't change anything or run commands. If any blocks, the commit stops with the file, lines and fix for each block. If a Reviewer can't reach a verdict (a crash, a timeout), the commit stops too: it fails closed.
 - **post-commit** ties the landed commit to the review that let it through, so the history shows which commit each review became.

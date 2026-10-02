@@ -222,3 +222,18 @@ pub fn stats(all: bool, days: Option<u32>, json_output: bool) -> Outcome {
     }
     Ok(0)
 }
+
+pub fn delete(id: &str) -> Outcome {
+    let store = Store::open_default()?;
+    if !store.delete_run(id)? {
+        return Err(format!("no run {id}"));
+    }
+    println!("Deleted {id}");
+    Ok(0)
+}
+
+pub fn prune_evals() -> Outcome {
+    let store = Store::open_default()?;
+    println!("Deleted {}", plural(store.prune_eval_runs()?, "eval run"));
+    Ok(0)
+}

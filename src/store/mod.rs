@@ -262,7 +262,7 @@ pub struct ReviewerRecord {
 
 pub enum StampResult {
     AlreadyStamped,
-    Stamped { run_id: String, matched_by: &'static str },
+    Stamped,
     NoMatch,
 }
 
@@ -915,7 +915,7 @@ impl Store {
                 params![run_id, sha, message, committed_at, matched_by],
             )
             .map_err(db_error)?;
-        Ok(StampResult::Stamped { run_id, matched_by })
+        Ok(StampResult::Stamped)
     }
 
     pub fn delete_run(&self, id: &str) -> Result<bool> {

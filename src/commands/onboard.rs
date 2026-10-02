@@ -18,12 +18,15 @@ pub struct OnboardArgs {
     /// At most this many Reviewers.
     #[arg(long)]
     pub max: Option<usize>,
-    /// Take the defaults without asking: every repo, your usual model, turn on the strong Reviewers, install hooks.
+    /// Take the defaults without asking: every repo, your usual model, the strongest Reviewers on, hooks installed.
     #[arg(long)]
     pub yes: bool,
     /// Build the material and stop before any agent runs.
     #[arg(long)]
     pub dry_run: bool,
+    /// Don't give your coding agents the reviewers skill.
+    #[arg(long)]
+    pub no_skill: bool,
 }
 
 pub fn run(args: OnboardArgs) -> Outcome {

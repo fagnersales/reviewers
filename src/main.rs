@@ -86,6 +86,9 @@ pub enum Command {
         evals: bool,
         #[arg(long, default_value_t = 20)]
         limit: u32,
+        /// Delete every eval run kept by `reviewers eval --record`. Commit reviews are never deleted in bulk.
+        #[arg(long)]
+        prune_evals: bool,
         #[command(flatten)]
         output: Output,
     },
@@ -95,6 +98,9 @@ pub enum Command {
         /// Also print each Reviewer's whole session: files read, thinking, tools.
         #[arg(long)]
         session: bool,
+        /// Delete this run from the history.
+        #[arg(long)]
+        delete: bool,
         #[command(flatten)]
         output: Output,
     },

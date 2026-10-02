@@ -2,7 +2,6 @@ use crate::commands::Outcome;
 use crate::store::Store;
 use crate::{hooks, skill, ui};
 use clap::Args;
-use serde_json::Value;
 use std::path::PathBuf;
 
 #[derive(Args)]
@@ -15,8 +14,9 @@ pub struct UpgradeArgs {
     pub finish: bool,
 }
 
-/// `{ "version": "0.2.0", "notes": ["…"], "assets": { "<target>": { "url": "…", "sha256": "…" } } }`
-const MANIFEST_URL: &str = "https://reviewers.sh/releases/latest.json";
+/// Plain text, so `install.sh` can read it with nothing but POSIX shell:
+/// `version 0.2.0`, any number of `note …` lines, and one `<target> <url> <sha256>` line per build.
+const MANIFEST_URL: &str = "https://reviewers.sh/releases/latest.txt";
 const MAX_BINARY_BYTES: u64 = 200 * 1024 * 1024;
 
 fn manifest_url() -> String {
@@ -42,10 +42,33 @@ fn newer(candidate: &str, current: &str) -> bool {
     version_parts(candidate) > version_parts(current)
 }
 
-fn fetch_manifest() -> Result<Value, String> {
+struct Manifest {
+    version: String,
+    notes: Vec<String>,
+    /// `(target, url, sha256)`
+    builds: Vec<(String, String, String)>,
+}
+
+fn parse_manifest(text: &str) -> Result<Manifest, String> {
+    let mut manifest = Manifest { version: String::new(), notes: Vec::new(), builds: Vec::new() };
+    for line in text.lines().map(str::trim).filter(|line| !line.is_empty() && !line.starts_with('#')) {
+        let mut words = line.split_whitespace();
+        match (words.next(), words.next(), words.next()) {
+            (Some("version"), Some(version), None) => manifest.version = version.to_string(),
+            (Some("note"), _, _) => manifest.notes.push(line["note".len()..].trim().to_string()),
+            (Some(target), Some(url), Some(sha256)) => manifest.builds.push((target.to_string(), url.to_string(), sha256.to_string())),
+            _ => return Err(format!("the release manifest has a line it can't read: {line}")),
+        }
+    }
+    if manifest.version.is_empty() {
+        return Err("the release manifest has no version".into());
+    }
+    Ok(manifest)
+}
+
+fn fetch_manifest() -> Result<Manifest, String> {
     let mut response = ureq::get(&manifest_url()).call().map_err(|error| format!("cannot reach {}: {error}", manifest_url()))?;
-    let text = response.body_mut().read_to_string().map_err(|error| error.to_string())?;
-    serde_json::from_str(&text).map_err(|error| format!("the release manifest is malformed: {error}"))
+    parse_manifest(&response.body_mut().read_to_string().map_err(|error| error.to_string())?)
 }
 
 /// The new binary's job: everything that depends on its version. The database migrates itself on open.
@@ -72,7 +95,7 @@ pub fn run(args: UpgradeArgs) -> Outcome {
     }
     let current = env!("CARGO_PKG_VERSION");
     let manifest = fetch_manifest()?;
-    let latest = manifest["version"].as_str().ok_or("the release manifest has no version")?;
+    let latest = manifest.version.as_str();
     if !newer(latest, current) {
         println!("reviewers {current} is the latest.");
         return Ok(0);
@@ -81,9 +104,7 @@ pub fn run(args: UpgradeArgs) -> Outcome {
         println!("reviewers {latest} is out (you have {current}). `reviewers upgrade` installs it.");
         return Ok(0);
     }
-    let asset = &manifest["assets"][target()];
-    let url = asset["url"].as_str().ok_or_else(|| format!("release {latest} has no build for {}", target()))?;
-    let expected = asset["sha256"].as_str().ok_or("the release manifest has no checksum")?;
+    let (_, url, expected) = manifest.builds.iter().find(|(build, _, _)| build == target()).ok_or_else(|| format!("release {latest} has no build for {}", target()))?;
     println!("Downloading reviewers {latest}…");
     let mut response = ureq::get(url).call().map_err(|error| format!("download failed: {error}"))?;
     let bytes = response.body_mut().with_config().limit(MAX_BINARY_BYTES).read_to_vec().map_err(|error| format!("download failed: {error}"))?;
@@ -102,10 +123,8 @@ pub fn run(args: UpgradeArgs) -> Outcome {
     // A rename over a running binary is safe on Unix: this process keeps the old file open.
     std::fs::rename(&staged, &exe).map_err(|error| format!("cannot replace {}: {error}", exe.display()))?;
     println!("{} reviewers {current} → {latest}", ui::green("✓"));
-    if let Some(notes) = manifest["notes"].as_array() {
-        for note in notes.iter().filter_map(Value::as_str) {
-            println!("  · {note}");
-        }
+    for note in &manifest.notes {
+        println!("  · {note}");
     }
     let status = std::process::Command::new(&exe).args(["upgrade", "--finish"]).status().map_err(|error| error.to_string())?;
     Ok(status.code().unwrap_or(0))
@@ -113,6 +132,14 @@ pub fn run(args: UpgradeArgs) -> Outcome {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn reads_the_plain_manifest() {
+        let manifest = super::parse_manifest("version 0.2.0\nnote Faster\naarch64-apple-darwin https://x/r abc123\n").expect("parses");
+        assert_eq!(manifest.version, "0.2.0");
+        assert_eq!(manifest.notes, vec!["Faster"]);
+        assert_eq!(manifest.builds[0].2, "abc123");
+    }
+
     #[test]
     fn compares_versions_by_number() {
         assert!(super::newer("0.10.0", "0.9.3"));

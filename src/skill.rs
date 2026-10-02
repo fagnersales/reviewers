@@ -69,7 +69,7 @@ pub fn targets() -> Vec<Target> {
             }
         }
     }
-    let mut targets = Vec::new();
+    let mut targets: Vec<Target> = Vec::new();
     let mut seen = Vec::new();
     for dir in claude_dirs {
         let resolved = dir.canonicalize().unwrap_or(dir.clone());
@@ -88,7 +88,20 @@ pub fn targets() -> Vec<Target> {
     if config_home().join("opencode").is_dir() {
         targets.push(Target { agent: "OpenCode".into(), dir: config_home().join("opencode").join("skills") });
     }
-    targets
+    merge_shared(targets)
+}
+
+/// Config folders often share one skills folder through a symlink; one link serves them all, so they're one line.
+fn merge_shared(targets: Vec<Target>) -> Vec<Target> {
+    let mut merged: Vec<(PathBuf, Target)> = Vec::new();
+    for target in targets {
+        let resolved = target.dir.canonicalize().unwrap_or(target.dir.clone());
+        match merged.iter_mut().find(|(existing, _)| *existing == resolved) {
+            Some((_, kept)) => kept.agent = format!("{}, {}", kept.agent.trim_end_matches(')'), target.agent.split_once('(').map(|(_, rest)| rest).unwrap_or(&target.agent)),
+            None => merged.push((resolved, target)),
+        }
+    }
+    merged.into_iter().map(|(_, target)| target).collect()
 }
 
 fn points_at_canonical(path: &Path) -> bool {
