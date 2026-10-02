@@ -13,7 +13,7 @@ fn db_error(error: rusqlite::Error) -> String {
 }
 
 const SCHEMA: &str = include_str!("schema.sql");
-const SCHEMA_VERSION: i64 = 4;
+const SCHEMA_VERSION: i64 = 5;
 
 /// Each step takes a database from the version before it to the next one.
 const MIGRATIONS: &[(i64, &str)] = &[
@@ -29,7 +29,12 @@ const MIGRATIONS: &[(i64, &str)] = &[
          ALTER TABLE decisions ADD COLUMN classifier TEXT;",
     ),
     (4, "ALTER TABLE projects ADD COLUMN ignored INTEGER NOT NULL DEFAULT 0;"),
+    (5, "ALTER TABLE decisions ADD COLUMN advisory INTEGER NOT NULL DEFAULT 0;"),
 ];
+
+fn is_false(value: &bool) -> bool {
+    !*value
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -165,6 +170,7 @@ pub struct NewReviewer {
     pub paths: Vec<String>,
     pub context_files: Vec<String>,
     pub enabled: bool,
+    pub blocking: bool,
     pub model: Option<String>,
     pub classifier: ClassifierUse,
     pub origin: Value,
@@ -230,6 +236,9 @@ pub struct Decision {
     pub reused_from: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub classifier: Option<Classified>,
+    /// Its Reviewer was advisory: a block was reported, and the commit went through.
+    #[serde(skip_serializing_if = "is_false")]
+    pub advisory: bool,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -609,7 +618,7 @@ impl Store {
         self.connection
             .execute(
                 "INSERT INTO reviewers (id, slug, name, instruction, scope, paths, context_files, enabled, blocking, model, version, origin, created_at, updated_at, classifier)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 1, ?9, 1, ?10, ?11, ?11, ?12)",
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?13, ?9, 1, ?10, ?11, ?11, ?12)",
                 params![
                     id,
                     slug,
@@ -622,7 +631,8 @@ impl Store {
                     input.model,
                     to_json(&input.origin),
                     now,
-                    input.classifier.as_text()
+                    input.classifier.as_text(),
+                    input.blocking as i64
                 ],
             )
             .map_err(db_error)?;
@@ -756,8 +766,8 @@ impl Store {
             transaction
                 .execute(
                     "INSERT OR IGNORE INTO decisions (id, run_id, reviewer_id, reviewer_name, reviewer_version, instruction, verdict, summary, reasoning,
-                       evidence, session, model, duration_ms, tokens_read, tokens_written, turns, tool_calls, input_hash, reused_from, classifier)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)",
+                       evidence, session, model, duration_ms, tokens_read, tokens_written, turns, tool_calls, input_hash, reused_from, classifier, advisory)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)",
                     params![
                         decision.id,
                         run.id,
@@ -778,7 +788,8 @@ impl Store {
                         decision.usage.tool_calls,
                         decision.input_hash,
                         decision.reused_from,
-                        decision.classifier.as_ref().map(to_json)
+                        decision.classifier.as_ref().map(to_json),
+                        decision.advisory as i64
                     ],
                 )
                 .map_err(db_error)?;
@@ -816,6 +827,7 @@ impl Store {
             input_hash: row.get("input_hash")?,
             reused_from: row.get("reused_from")?,
             classifier: row.get::<_, Option<String>>("classifier")?.and_then(|text| serde_json::from_str(&text).ok()),
+            advisory: row.get::<_, i64>("advisory")? != 0,
         })
     }
 
@@ -830,6 +842,22 @@ impl Store {
             .map_err(db_error)?;
         let rows = statement
             .query_map([since], |row| Ok((row.get::<_, Option<String>>("outcome")?.unwrap_or_default(), row.get::<_, i64>("count")? as u64)))
+            .map_err(db_error)?;
+        rows.collect::<rusqlite::Result<Vec<_>>>().map_err(db_error)
+    }
+
+    /// `(version, instruction, first judged at, decisions)` for every version that judged something, newest first.
+    pub fn reviewer_versions(&self, reviewer_id: &str) -> Result<Vec<(i64, String, String, u64)>> {
+        let mut statement = self
+            .connection
+            .prepare(
+                "SELECT d.reviewer_version AS version, max(d.instruction) AS instruction, min(r.started_at) AS first, count(*) AS decisions
+                 FROM decisions d JOIN runs r ON r.id = d.run_id WHERE d.reviewer_id = ?1
+                 GROUP BY d.reviewer_version ORDER BY d.reviewer_version DESC",
+            )
+            .map_err(db_error)?;
+        let rows = statement
+            .query_map([reviewer_id], |row| Ok((row.get("version")?, row.get("instruction")?, row.get("first")?, row.get::<_, i64>("decisions")? as u64)))
             .map_err(db_error)?;
         rows.collect::<rusqlite::Result<Vec<_>>>().map_err(db_error)
     }
@@ -1200,6 +1228,7 @@ mod tests {
                  ALTER TABLE decisions DROP COLUMN classifier;
                  ALTER TABLE reviewers DROP COLUMN classifier;
                  ALTER TABLE projects DROP COLUMN ignored;
+                 ALTER TABLE decisions DROP COLUMN advisory;
                  PRAGMA user_version = 1;",
             )
             .unwrap();

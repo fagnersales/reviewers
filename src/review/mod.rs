@@ -13,7 +13,8 @@ use std::time::{Duration, Instant};
 /// Exit codes the commit-msg hook returns; anything but 0 stops the commit.
 pub const EXIT_APPROVED: i32 = 0;
 pub const EXIT_BLOCKED: i32 = 1;
-pub const EXIT_FAILED: i32 = 2;
+/// Not 2: that's what a usage error (an unknown flag) exits with.
+pub const EXIT_FAILED: i32 = 3;
 
 pub struct StructuredDecision {
     pub verdict: Verdict,
@@ -126,6 +127,7 @@ fn judge_prepared(reviewer: &Reviewer, model: Option<&str>, prepared: &Prepared,
         input_hash: Some(prepared.input_hash.clone()),
         reused_from: None,
         classifier: None,
+        advisory: false,
     })
 }
 
@@ -177,6 +179,7 @@ fn cleared(reviewer: &Reviewer, note: Classified) -> Decision {
         input_hash: None,
         reused_from: None,
         classifier: Some(note),
+        advisory: false,
     }
 }
 
@@ -196,13 +199,15 @@ pub fn judge_all(
     on_done: &mut dyn FnMut(&Judged),
 ) -> Vec<Judged> {
     let repository = project.remote.clone().unwrap_or_else(|| project.name.clone());
+    // `REVIEWERS_FRESH=1`: judge again even when the same input was judged before.
+    let fresh = std::env::var("REVIEWERS_FRESH").is_ok_and(|value| value == "1");
     let mut judged = Vec::with_capacity(reviewers.len());
     let mut to_classify = Vec::new();
     let mut to_run = Vec::new();
     for reviewer in reviewers {
         let model = resolve_model(store, project, &reviewer);
         let prepared = prepare(&reviewer, model.as_deref(), &repository, diff, root);
-        match store.judged_before(&project.id, &prepared.input_hash) {
+        match store.judged_before(&project.id, &prepared.input_hash).map(|earlier| earlier.filter(|_| !fresh)) {
             Ok(Some(earlier)) => {
                 let result = Judged { reviewer, outcome: Ok(reused(earlier)) };
                 on_done(&result);
@@ -277,10 +282,13 @@ pub fn record(store: &mut Store, project: &Project, kind: RunKind, judged: Vec<J
         match item.outcome {
             Ok(mut decision) => {
                 decision.run_id = run_id.clone();
+                decision.advisory = !item.reviewer.blocking;
                 blocked |= decision.verdict == Verdict::Blocked && item.reviewer.blocking;
                 decisions.push(decision);
             }
-            Err(error) => failures.push(format!("{}: {error}", item.reviewer.name)),
+            Err(error) if item.reviewer.blocking => failures.push(format!("{}: {error}", item.reviewer.name)),
+            // Advisory: it never stops a commit, not even by failing. The hook already said so.
+            Err(_) => {}
         }
     }
     decisions.sort_by(|a, b| a.reviewer_name.cmp(&b.reviewer_name));
@@ -342,6 +350,7 @@ mod tests {
                 paths: Vec::new(),
                 context_files: Vec::new(),
                 enabled: true,
+                blocking: true,
                 model: None,
                 classifier: crate::store::ClassifierUse::Default,
                 origin: json!({}),
@@ -369,6 +378,7 @@ mod tests {
             input_hash: Some(input_hash),
             reused_from: None,
             classifier: None,
+            advisory: false,
         }
     }
 
@@ -407,6 +417,29 @@ mod tests {
         assert!(store.judged_before(&project.id, &changed_rule.input_hash).unwrap().is_none());
         let other_model = prepare(&reviewer, Some("opus"), &project.name, DIFF, &directory);
         assert!(store.judged_before(&project.id, &other_model.input_hash).unwrap().is_none());
+        let _ = std::fs::remove_dir_all(&directory);
+    }
+
+    #[test]
+    fn an_advisory_block_is_reported_and_lets_the_commit_through() {
+        let (mut store, project, reviewer, directory) = fixture();
+        let advisory = store.update_reviewer(&reviewer.id, crate::store::ReviewerChanges { blocking: Some(false), ..Default::default() }).unwrap();
+        let judged = vec![Judged { reviewer: advisory.clone(), outcome: Ok(judged_block(&advisory, "hash".into())) }];
+        let reviewed = record(&mut store, &project, RunKind::Review, judged, DIFF, None, now_iso(), Instant::now()).unwrap();
+        assert_eq!(reviewed.exit_code, EXIT_APPROVED);
+        assert!(reviewed.run.decisions[0].advisory);
+        let report = terminal::report(&reviewed.run, &terminal::Paint::plain());
+        assert!(report.contains("1 Reviewer passed") && report.contains("1 advisory note"), "{report}");
+        assert!(report.contains("Advisory only: the commit went through"), "{report}");
+        assert!(!report.contains("blocked by") && !report.contains("Fix the code above"), "{report}");
+        // Read back, it's still marked advisory.
+        assert!(store.run(&reviewed.run.id, false).unwrap().unwrap().decisions[0].advisory);
+        // An advisory Reviewer that reaches no verdict doesn't stop the commit either; a blocking one does.
+        let failed = |reviewer: &Reviewer| vec![Judged { reviewer: reviewer.clone(), outcome: Err("timed out".into()) }];
+        let reviewed = record(&mut store, &project, RunKind::Review, failed(&advisory), DIFF, None, now_iso(), Instant::now()).unwrap();
+        assert_eq!((reviewed.exit_code, reviewed.run.failure.is_none()), (EXIT_APPROVED, true));
+        let reviewed = record(&mut store, &project, RunKind::Review, failed(&reviewer), DIFF, None, now_iso(), Instant::now()).unwrap();
+        assert_eq!(reviewed.exit_code, EXIT_FAILED);
         let _ = std::fs::remove_dir_all(&directory);
     }
 

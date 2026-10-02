@@ -162,7 +162,7 @@ pub enum Coverage {
 }
 
 /// Makes sure commits here reach Reviewers. The global hooks cover a repo unless it sets its own
-/// hooks folder (husky, lefthook), which git prefers; then the hooks go in that folder.
+/// hooks folder (`core.hooksPath`, as husky sets), which git prefers; then the hooks go in that folder.
 pub fn cover(root: &Path, take_over_workspace: bool) -> Result<Coverage, String> {
     if git::local_hooks_path(root).is_none() && global_installed() {
         return Ok(Coverage::Global);
@@ -323,7 +323,11 @@ pub fn commit_msg(message_file: Option<&str>) -> i32 {
     let classifier = crate::classifier::connected();
     let judged = review::judge_all(&store, &project, reviewers, &diff, &root, classifier.as_ref(), &mut |judged| match &judged.outcome {
         Ok(decision) => {
-            let mark = if decision.verdict == crate::store::Verdict::Approved { paint.green("✓") } else { paint.red("✗") };
+            let mark = match (decision.verdict, judged.reviewer.blocking) {
+                (crate::store::Verdict::Approved, _) => paint.green("✓"),
+                (_, true) => paint.red("✗"),
+                (_, false) => paint.yellow("✗"),
+            };
             let cleared = decision.classifier.as_ref().filter(|note| note.outcome == crate::classifier::Outcome::Cleared);
             let timing = match (&decision.reused_from, cleared) {
                 (Some(run), _) => format!("unchanged since {run}"),

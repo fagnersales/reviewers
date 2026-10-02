@@ -35,20 +35,27 @@ pub enum CaseCommand {
     Add(CaseAddArgs),
     /// A Reviewer's cases.
     List {
+        /// Name, slug or id of the Reviewer.
         reviewer: String,
+        /// Print JSON instead of text, for agents and scripts.
         #[arg(long)]
         json: bool,
     },
     /// Rename a case or flip its expected verdict.
     Update {
+        /// The case id, from `reviewers case list`.
         case: String,
+        /// A new name.
         #[arg(long)]
         name: Option<String>,
         #[arg(long, value_enum)]
         expect: Option<Expect>,
     },
     /// Delete a case. Past eval batches keep their record of it.
-    Remove { case: String },
+    Remove {
+        /// The case id, from `reviewers case list`.
+        case: String,
+    },
 }
 
 #[derive(Args)]
@@ -90,6 +97,7 @@ pub struct EvalArgs {
     /// Also keep each judged case as an eval run, so `reviewers run <id> --session` can show it.
     #[arg(long)]
     pub record: bool,
+    /// Print JSON instead of text, for agents and scripts.
     #[arg(long)]
     pub json: bool,
 }
@@ -596,6 +604,7 @@ mod tests {
                 paths: vec!["src/**".into()],
                 context_files: Vec::new(),
                 enabled: true,
+                blocking: true,
                 model: None,
                 classifier: crate::store::ClassifierUse::Default,
                 origin: json!({}),

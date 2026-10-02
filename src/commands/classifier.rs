@@ -16,10 +16,11 @@ const NOT_CONNECTED: &str = "no classifier is connected: `reviewers classifier c
 pub enum ClassifierCommand {
     /// What's connected, the cutoffs, and what it cleared lately.
     Status {
+        /// Print JSON instead of text, for agents and scripts.
         #[arg(long)]
         json: bool,
     },
-    /// Connect Jev with a key, read from a hidden prompt or from stdin. One small call checks it first.
+    /// Connect Jev, TypeSafe's evaluation model, with a key read from a hidden prompt or from stdin. One small call checks it first.
     Connect {
         #[arg(value_enum)]
         provider: Provider,
@@ -30,12 +31,16 @@ pub enum ClassifierCommand {
     /// Forget the key. Every Reviewer runs in full again.
     Disconnect,
     /// Show or set the default cutoff, from 0 to 1. Under it, the classifier clears a Reviewer.
-    Cutoff { value: Option<f64> },
-    /// Replay recent commits through the classifier: what it would have cleared, and any block it would have missed.
+    Cutoff {
+        /// From 0 to 1; leave it out to print the current one.
+        value: Option<f64>,
+    },
+    /// Replay recent commits from every repo through the classifier: what it would have cleared, and any block it would have missed. Makes real calls on the key.
     Check {
         /// How many recent commits.
         #[arg(long, default_value_t = 50)]
         runs: u32,
+        /// Print JSON instead of text, for agents and scripts.
         #[arg(long)]
         json: bool,
     },

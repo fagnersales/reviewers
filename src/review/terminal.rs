@@ -14,6 +14,11 @@ impl Paint {
         Paint { on: std::io::stderr().is_terminal() && std::env::var_os("NO_COLOR").is_none() }
     }
 
+    #[cfg(test)]
+    pub fn plain() -> Paint {
+        Paint { on: false }
+    }
+
     fn wrap(&self, code: &str, text: &str) -> String {
         if self.on { format!("\x1b[{code}m{text}\x1b[0m") } else { text.to_string() }
     }
@@ -50,7 +55,7 @@ fn location(evidence: &Evidence) -> String {
 pub fn report(run: &Run, paint: &Paint) -> String {
     let tokens: u64 = run.decisions.iter().map(|decision| decision.usage.tokens_read + decision.usage.tokens_written).sum();
     let footer = paint.dim(&format!("· {} · {} tokens", duration(run.duration_ms), compact(tokens)));
-    let blocked: Vec<_> = run.decisions.iter().filter(|decision| decision.verdict == Verdict::Blocked).collect();
+    let (blocked, advisory): (Vec<_>, Vec<_>) = run.decisions.iter().filter(|decision| decision.verdict == Verdict::Blocked).partition(|decision| !decision.advisory);
     let blocked_before = blocked.iter().any(|decision| decision.reused_from.is_some());
     let mut lines = Vec::new();
     if let Some(failure) = &run.failure {
@@ -60,18 +65,13 @@ pub fn report(run: &Run, paint: &Paint) -> String {
         lines.push(format!("Try the commit again: only the Reviewers without a verdict run again. If it keeps failing: `reviewers run {}`.", run.id));
         return lines.join("\n");
     }
-    if blocked.is_empty() {
-        let cleared = run.decisions.iter().filter(|decision| decision.classifier.as_ref().is_some_and(|note| note.outcome == crate::classifier::Outcome::Cleared)).count();
-        let note = if cleared > 0 { paint.dim(&format!(" ({cleared} cleared by the classifier)")) } else { String::new() };
-        return format!("{PREFIX} {}{note} {footer}", paint.green(&format!("{} passed", crate::util::plural(run.decisions.len(), "Reviewer"))));
-    }
-    lines.push(format!(
-        "{PREFIX} {} {footer}",
-        paint.red(&format!("blocked by {} of {}", blocked.len(), crate::util::plural(run.decisions.len(), "Reviewer")))
-    ));
-    for decision in blocked {
+    let finding = |lines: &mut Vec<String>, decision: &crate::store::Decision| {
         lines.push(String::new());
-        lines.push(format!("{} {}", paint.red("✗"), paint.bold(&decision.reviewer_name)));
+        if decision.advisory {
+            lines.push(format!("{} {} {}", paint.yellow("✗"), paint.bold(&decision.reviewer_name), paint.dim("(advisory: reported, not enforced)")));
+        } else {
+            lines.push(format!("{} {}", paint.red("✗"), paint.bold(&decision.reviewer_name)));
+        }
         lines.push(format!("  {}", decision.summary));
         for evidence in &decision.evidence {
             lines.push(String::new());
@@ -83,6 +83,34 @@ pub fn report(run: &Run, paint: &Paint) -> String {
             }
             lines.push(format!("  → {}", evidence.explanation));
         }
+    };
+    if blocked.is_empty() {
+        let cleared = run.decisions.iter().filter(|decision| decision.classifier.as_ref().is_some_and(|note| note.outcome == crate::classifier::Outcome::Cleared)).count();
+        let mut notes = Vec::new();
+        if cleared > 0 {
+            notes.push(format!("{cleared} cleared by the classifier"));
+        }
+        if !advisory.is_empty() {
+            notes.push(crate::util::plural(advisory.len(), "advisory note"));
+        }
+        let note = if notes.is_empty() { String::new() } else { paint.dim(&format!(" ({})", notes.join(", "))) };
+        lines.push(format!("{PREFIX} {}{note} {footer}", paint.green(&format!("{} passed", crate::util::plural(run.decisions.len(), "Reviewer")))));
+        if advisory.is_empty() {
+            return lines.join("\n");
+        }
+        for decision in advisory {
+            finding(&mut lines, decision);
+        }
+        lines.push(String::new());
+        lines.push(format!("Advisory only: the commit went through. Full reasoning: `reviewers run {}`.", run.id));
+        return lines.join("\n");
+    }
+    lines.push(format!(
+        "{PREFIX} {} {footer}",
+        paint.red(&format!("blocked by {} of {}", blocked.len(), crate::util::plural(run.decisions.len(), "Reviewer")))
+    ));
+    for decision in blocked.iter().chain(&advisory) {
+        finding(&mut lines, decision);
     }
     lines.push(String::new());
     if blocked_before {

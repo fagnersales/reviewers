@@ -68,26 +68,33 @@ pub enum Command {
     Edit(commands::reviewers::EditArgs),
     /// Turn Reviewers on.
     Enable {
+        /// Names, slugs or ids.
         #[arg(required = true)]
         reviewers: Vec<String>,
     },
     /// Turn Reviewers off without deleting them or their history.
     Disable {
+        /// Names, slugs or ids.
         #[arg(required = true)]
         reviewers: Vec<String>,
     },
     /// Delete a Reviewer and its eval cases. Past decisions stay in the history.
-    Remove { reviewer: String },
+    Remove {
+        /// Name, slug or id.
+        reviewer: String,
+    },
     /// Recent commit reviews: this repo's, or every repo's with --all.
     Runs {
+        /// Every repo, not just this one.
         #[arg(long)]
         all: bool,
         /// Include eval runs.
         #[arg(long)]
         evals: bool,
+        /// How many runs to list.
         #[arg(long, default_value_t = 20)]
         limit: u32,
-        /// Delete every eval run kept by `reviewers eval --record`. Commit reviews are never deleted in bulk.
+        /// Delete every eval run kept by `reviewers eval --record`. Eval scores (`reviewers evals`) stay; commit reviews are never deleted in bulk.
         #[arg(long)]
         prune_evals: bool,
         #[command(flatten)]
@@ -95,6 +102,7 @@ pub enum Command {
     },
     /// One review in full: every verdict, its evidence and reasoning.
     Run {
+        /// The run id, from the hook's output or `reviewers runs`.
         id: String,
         /// Also print each Reviewer's whole session: files read, thinking, tools.
         #[arg(long)]
@@ -123,7 +131,9 @@ pub enum Command {
     Eval(evals::EvalArgs),
     /// A Reviewer's eval history, newest first.
     Evals {
+        /// Name, slug or id.
         reviewer: String,
+        /// How many batches to list.
         #[arg(long, default_value_t = 10)]
         limit: u32,
         /// Delete one batch instead.
@@ -132,30 +142,32 @@ pub enum Command {
         #[command(flatten)]
         output: Output,
     },
-    /// Repos Reviewers judge.
+    /// Repos registered with Reviewers, and how many Reviewers judge each; ignored ones are marked.
     Repos(Output),
     /// Start judging this repo (or PATH): register it and install its hooks.
     Init {
+        /// Any path inside the repo; defaults to the current directory.
         path: Option<std::path::PathBuf>,
     },
     /// Stop judging this repo (or PATH), even under the global hooks. `reviewers init` undoes it.
     Ignore {
+        /// Any path inside the repo; defaults to the current directory.
         path: Option<std::path::PathBuf>,
     },
     /// The git hooks that run Reviewers.
     #[command(subcommand)]
     Hooks(commands::repos::HooksCommand),
-    /// Show or set the default model Reviewers run on.
+    /// Show or set the model Reviewers run on. A Reviewer's own model (`edit --model`) wins, then the repo's, then this default, then Claude Code's own.
     Model {
-        /// A model id or alias, or `default` to use Claude Code's own default.
+        /// Any model id or alias `claude --model` accepts (`sonnet`, `opus`, or a full id), or `default` to clear this level. Leave it out to print the current one.
         model: Option<String>,
-        /// Set it for this repo only.
+        /// For the repo you're in only.
         #[arg(long)]
         repo: bool,
     },
     /// Bring over Reviewers, history and evals from Personal Workspace.
     Import(import::ImportArgs),
-    /// The classifier: a cheap first pass that skips Reviewers a change can't concern.
+    /// The classifier: a cheap first pass that skips Reviewers a change can't concern. With no subcommand, the same as `status`.
     Classifier {
         #[command(subcommand)]
         command: Option<commands::classifier::ClassifierCommand>,
@@ -174,7 +186,12 @@ pub enum Command {
 
 #[derive(Subcommand)]
 pub enum HookCommand {
-    CommitMsg { message_file: Option<String> },
+    /// What the commit-msg hook calls: judges the staged change; anything but exit 0 stops the commit.
+    CommitMsg {
+        /// The commit message file git hands the hook; without it, the review is kept without a message.
+        message_file: Option<String>,
+    },
+    /// What the post-commit hook calls: ties the landed commit to the review that let it through.
     PostCommit,
 }
 

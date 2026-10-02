@@ -121,7 +121,11 @@ pub fn show(id: &str, with_session: bool, json_output: bool) -> Outcome {
         println!("\n{}\n{failure}", ui::yellow("Could not reach a verdict:"));
     }
     for decision in &run.decisions {
-        let mark = if decision.verdict == Verdict::Blocked { ui::red("✗") } else { ui::green("✓") };
+        let mark = match (decision.verdict, decision.advisory) {
+            (Verdict::Blocked, false) => ui::red("✗"),
+            (Verdict::Blocked, true) => ui::yellow("✗ advisory"),
+            _ => ui::green("✓"),
+        };
         println!(
             "\n{mark} {} {}",
             ui::bold(&decision.reviewer_name),

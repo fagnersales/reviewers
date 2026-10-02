@@ -10,24 +10,29 @@ use std::path::{Path, PathBuf};
 pub enum HooksCommand {
     /// Install the hooks in this repo (or PATH), in every registered repo with --all, or for every repo on this machine with --global.
     Install {
+        /// Any path inside the repo; defaults to the current directory.
         path: Option<PathBuf>,
+        /// Every registered repo that isn't ignored.
         #[arg(long)]
         all: bool,
         /// Replace Personal Workspace's hooks.
         #[arg(long)]
         take_over: bool,
-        /// Through git's global core.hooksPath: every repo, new ones included, with no setup. Each repo's own hooks still run.
+        /// Through git's global core.hooksPath: every repo without its own hooks folder, new ones included, with no setup. Each repo's own hooks still run first (or, if another global hooks folder was set before, that folder's).
         #[arg(long, conflicts_with_all = ["path", "all"])]
         global: bool,
     },
     /// Remove the hooks from this repo (or PATH), or the global ones with --global, setting back what was there before.
     Uninstall {
+        /// Any path inside the repo; defaults to the current directory.
         path: Option<PathBuf>,
+        /// The global hooks, setting git's global core.hooksPath back to what it was.
         #[arg(long, conflicts_with = "path")]
         global: bool,
     },
-    /// Which repos have the hooks.
+    /// Whether the global hooks are on, and how each registered repo is covered.
     Status {
+        /// Print JSON instead of text, for agents and scripts.
         #[arg(long)]
         json: bool,
     },
@@ -128,7 +133,7 @@ pub fn hooks(command: HooksCommand) -> Outcome {
         }
         HooksCommand::Install { path, all, take_over, .. } => {
             let targets: Vec<(String, PathBuf)> = if all {
-                store.projects()?.into_iter().map(|project| (project.name, PathBuf::from(project.root))).collect()
+                store.projects()?.into_iter().filter(|project| !project.ignored).map(|project| (project.name, PathBuf::from(project.root))).collect()
             } else {
                 let start = path.unwrap_or_else(cwd);
                 let project = project_here(&store, &start)?.ok_or("this repo isn't judged by Reviewers yet; run `reviewers init`")?;

@@ -89,7 +89,9 @@ CREATE TABLE decisions (
   input_hash TEXT,
   reused_from TEXT,
   -- What the classifier did before (or instead of) the session, as JSON.
-  classifier TEXT
+  classifier TEXT,
+  -- The Reviewer was advisory: a block here was reported, not enforced.
+  advisory INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX decisions_run ON decisions(run_id);
 CREATE INDEX decisions_reviewer ON decisions(reviewer_id, run_id);

@@ -7,7 +7,7 @@ You are the one who fixes, adds and tunes Reviewers. The person states rules; yo
 ## When a commit is blocked
 
 1. Read the hook output: every block names the file, the lines and what to do.
-2. Fix the code, stage it, and commit again with the same message. Committing the same diff again gets the same verdicts back without running: only a change to the code or to the Reviewer is judged anew.
+2. Fix the code, stage it, and commit again with the same message. Committing the same diff again gets the same verdicts back without running: only a change to the code or to the Reviewer is judged anew. `REVIEWERS_FRESH=1 git commit …` asks for a fresh judgement of the same code, only when the person asks.
 3. If a block makes no sense, read the Reviewer's full reasoning: `reviewers run <run-id> --json` (the id is in the hook output). If the Reviewer is wrong, fix the Reviewer rather than working around it: capture the diff as an `approved` case and tune the instruction (`reviewers help evals`).
 4. Never bypass with `--no-verify` or `REVIEWERS_BYPASS=1` unless the person asks.
 
@@ -28,12 +28,39 @@ A commit that ends "could not reach a verdict" means a Reviewer crashed or timed
 
 ## The classifier
 
-When one is connected (`reviewers classifier status --json`), it clears the Reviewers a change can't concern before any session starts. After connecting it, run `reviewers classifier check --json`: for any Reviewer with `missedBlocks`, set a cutoff under its `lowestBlockScore` (`reviewers edit <name> --classifier 0.1`) or turn it off for that Reviewer (`--classifier off`). `reviewers help classifier` has the rest.
+The classifier is optional. It asks Jev, TypeSafe's evaluation model, which Reviewers a change can't concern, and clears them before any session starts; it's reached with a Vercel AI Gateway key or a TypeSafe key (`reviewers help classifier`). Whether one is connected: `reviewers classifier status --json`. After connecting it, run `reviewers classifier check --json`: for any Reviewer with `missedBlocks`, set a cutoff at or under its `lowestBlockScore` (`reviewers edit <name> --classifier 0.1`) or turn it off for that Reviewer (`--classifier off`). `reviewers help classifier` has the rest.
 
 ## Repos
 
-`reviewers hooks status --json` says whether the global hooks are on. With them, every repo runs the Reviewers meant for every repo, and a new repo needs nothing; without them, `reviewers init` starts judging one. A repo that sets its own hooks folder (husky, lefthook) needs `reviewers init` either way. `reviewers ignore` stops Reviewers in a repo the person doesn't want judged.
+`reviewers hooks status --json` says whether the global hooks are on. With them, every repo runs the Reviewers meant for every repo, and a new repo needs nothing; without them, `reviewers init` starts judging one. A repo that sets its own hooks folder (`git config core.hooksPath` prints one, as with husky) needs `reviewers init` either way, plus, where another tool owns the hooks, `reviewers hook commit-msg "$1"` in its commit-msg hook and `reviewers hook post-commit` in its post-commit hook (`reviewers help hooks` has husky and lefthook). `reviewers ignore` stops Reviewers in a repo the person doesn't want judged.
 
 ## Data
 
 Everything lives in `~/.reviewers/reviewers.sqlite` on this machine. Diffs go to the model through the person's own Claude Code, and, when a classifier is connected, to its provider.
+
+## Environment, files and exit codes
+
+`reviewers` with no command starts the first run when there are no Reviewers yet (in a terminal), shows this repo's status inside a judged repo, and prints the help anywhere else.
+
+Environment variables:
+
+- `REVIEWERS_BYPASS=1`: the hooks let the commit through without reviewing it. Only when the person asks.
+- `REVIEWERS_FRESH=1`: judge again even code that was judged before, instead of giving the earlier verdict back. Only when the person asks.
+- `REVIEWERS_HOME`: where everything is kept, instead of `~/.reviewers`. To move existing data: move the whole folder; set the variable wherever commits happen (the hooks read it from the committing shell); if `bin/reviewers` moved with it, fix the PATH line the installer added (marked `# added by reviewers`); then, if the global hooks were on, run `reviewers hooks install --global` again, and run `reviewers hooks install --all` for repos with their own install, so every hook calls the program where it now is. Settings, including the global hooks folder that was set before, live in `reviewers.sqlite` and move with it.
+- `REVIEWERS_TRACE_DIR`: keeps every Claude session's raw output stream there, one `.jsonl` file each, for a review that ended without an answer: `REVIEWERS_TRACE_DIR=/tmp/reviewers-trace git commit …`.
+- `REVIEWERS_RELEASES_URL`: where `reviewers upgrade` and the installer read the release manifest, instead of `https://reviewers.sh/releases/latest.txt`.
+- `REVIEWERS_NO_ONBOARD=1`: the installer doesn't start the first run.
+- `NO_COLOR`: plain text, no colors.
+- `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `XDG_CONFIG_HOME`: where `reviewers skill install` finds Claude Code, Codex and OpenCode.
+
+Files, in `~/.reviewers` (or `REVIEWERS_HOME`):
+
+- `reviewers.sqlite`: Reviewers, repos, every review with its diff and sessions, eval cases, settings.
+- `bin/reviewers`: the program, when the installer put it there.
+- `hooks/`: the global hooks, when `reviewers hooks install --global` is on.
+- `classifier.json`: the classifier's provider and key, readable by the owner only.
+- `onboard/<date>/`: what each first run read and found.
+
+The skill itself is `~/.agents/skills/reviewers`, linked into each agent's skills folder (`reviewers skill install --json` lists them).
+
+Exit codes: the commit hook exits 0 when every Reviewer approves, when only advisory ones block or fail, or when `REVIEWERS_BYPASS=1` skips it; 1 when a blocking Reviewer blocks; and 3 when the commit couldn't be reviewed (a blocking Reviewer reached no verdict, or Reviewers' data couldn't be read), which wins over 1. Anything but 0 stops the commit (`reviewers help hooks`). `reviewers eval` exits 1 when a case doesn't match. Every other command exits 0, or 1 with the error on stderr. A usage error (an unknown flag, a missing argument) exits 2 and prints the usage, from any command.

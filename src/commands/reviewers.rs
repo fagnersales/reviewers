@@ -16,7 +16,7 @@ pub struct NewArgs {
     /// Judge every repo instead of just this one.
     #[arg(long)]
     pub everywhere: bool,
-    /// Repos to judge (paths). Defaults to the repo you're in.
+    /// Repos to judge (paths); repeat it for several. Defaults to the repo you're in.
     #[arg(long = "repo")]
     pub repos: Vec<std::path::PathBuf>,
     /// Only run when the diff touches these globs, comma-separated: `convex/**,shared/**`.
@@ -25,7 +25,7 @@ pub struct NewArgs {
     /// Repo files attached to every review as reference, comma-separated.
     #[arg(long)]
     pub context_files: Option<String>,
-    /// Model for this Reviewer only.
+    /// Model for this Reviewer only: any id or alias `claude --model` accepts. Without it, the repo's or the default model (`reviewers model`).
     #[arg(long)]
     pub model: Option<String>,
     /// When the classifier may skip it: `default`, `off`, or a cutoff from 0 to 1.
@@ -34,12 +34,16 @@ pub struct NewArgs {
     /// Create it turned off.
     #[arg(long)]
     pub disabled: bool,
+    /// Report its blocks without stopping the commit.
+    #[arg(long)]
+    pub advisory: bool,
 }
 
 #[derive(Args)]
 pub struct EditArgs {
     /// Name, slug or id.
     pub reviewer: String,
+    /// A new name.
     #[arg(long)]
     pub name: Option<String>,
     /// A new instruction is a new version.
@@ -51,7 +55,7 @@ pub struct EditArgs {
     /// Comma-separated files, or `none`.
     #[arg(long)]
     pub context_files: Option<String>,
-    /// A model id, or `default` to inherit.
+    /// A model id or alias, or `default` to use the repo's or the default model (`reviewers model`).
     #[arg(long)]
     pub model: Option<String>,
     /// Judge every repo.
@@ -66,7 +70,7 @@ pub struct EditArgs {
     /// Unlink a repo (path).
     #[arg(long)]
     pub remove_repo: Vec<std::path::PathBuf>,
-    /// Report without stopping the commit.
+    /// Report its blocks without stopping the commit; `--blocking` undoes it. Can't be combined with `--blocking`.
     #[arg(long)]
     pub advisory: bool,
     /// Stop the commit when it blocks (the default).
@@ -149,6 +153,7 @@ pub fn show(handle: &str, limit: u32, json: bool) -> Outcome {
     let record = records.iter().find(|record| record.reviewer_id == reviewer.id);
     let decisions = store.decisions_for(&reviewer.id, None, limit)?;
     let cases = store.cases(&reviewer.id, false)?;
+    let versions = store.reviewer_versions(&reviewer.id)?;
     let projects = store.projects()?;
     let repos: Vec<String> = reviewer.project_ids.iter().filter_map(|id| projects.iter().find(|project| &project.id == id).map(|project| project.name.clone())).collect();
     if json {
@@ -157,6 +162,9 @@ pub fn show(handle: &str, limit: u32, json: bool) -> Outcome {
             "repos": repos,
             "record": record,
             "cases": cases.len(),
+            "versions": versions.iter().map(|(version, instruction, first, decisions)| json!({
+                "version": version, "instruction": instruction, "firstJudged": first, "decisions": decisions,
+            })).collect::<Vec<_>>(),
             "recentDecisions": decisions.iter().map(|(decision, at, sha)| json!({
                 "runId": decision.run_id, "at": at, "commit": sha, "verdict": decision.verdict, "summary": decision.summary,
                 "evidence": decision.evidence, "tokens": decision.usage.tokens_read + decision.usage.tokens_written,
@@ -197,6 +205,10 @@ pub fn show(handle: &str, limit: u32, json: bool) -> Outcome {
         None => println!("Record: no commits judged yet"),
     }
     println!("Eval cases: {}", cases.len());
+    if versions.len() > 1 {
+        let listed: Vec<String> = versions.iter().map(|(version, _, first, decisions)| format!("v{version} from {} ({decisions})", first.get(..10).unwrap_or(first))).collect();
+        println!("Versions: {} {}", listed.join(" · "), ui::dim("· every instruction: `--json`"));
+    }
     if !decisions.is_empty() {
         println!();
         for (decision, at, sha) in &decisions {
@@ -225,6 +237,7 @@ pub fn new(args: NewArgs) -> Outcome {
         paths: args.paths.as_deref().map(scope::parse_list).unwrap_or_default(),
         context_files: args.context_files.as_deref().map(scope::parse_list).unwrap_or_default(),
         enabled: !args.disabled,
+        blocking: !args.advisory,
         model: args.model,
         classifier: args.classifier.unwrap_or(ClassifierUse::Default),
         origin: json!({ "kind": "manual" }),

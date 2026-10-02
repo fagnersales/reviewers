@@ -13,11 +13,13 @@ const NAME: &str = "reviewers";
 pub enum SkillCommand {
     /// Find the coding agents on this machine and give each the skill.
     Install {
+        /// Print JSON instead of text, for agents and scripts.
         #[arg(long)]
         json: bool,
     },
     /// Where the skill is, and which agents have it.
     Status {
+        /// Print JSON instead of text, for agents and scripts.
         #[arg(long)]
         json: bool,
     },

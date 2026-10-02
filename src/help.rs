@@ -37,10 +37,11 @@ fn argument_line(argument: &clap::Arg) -> Option<String> {
         None => format!("<{}>", id.to_uppercase()),
     };
     let required = if argument.is_required_set() { " (required)" } else { "" };
+    let takes_values = argument.get_action().takes_values();
     let values: Vec<String> = argument
         .get_possible_values()
         .iter()
-        .filter(|value| !value.is_hide_set())
+        .filter(|value| takes_values && !value.is_hide_set())
         .map(|value| match value.get_help() {
             Some(help) => format!("`{}` ({})", value.get_name(), help.to_string().trim_end_matches('.')),
             None => format!("`{}`", value.get_name()),
@@ -51,6 +52,8 @@ fn argument_line(argument: &clap::Arg) -> Option<String> {
         (true, false) => format!("one of {}", values.join(", ")),
         (false, false) => format!("{help}; one of {}", values.join(", ")),
     };
+    let defaults: Vec<String> = argument.get_default_values().iter().map(|value| value.to_string_lossy().to_string()).collect();
+    let help = if argument.get_action().takes_values() && !defaults.is_empty() { format!("{help} (default: {})", defaults.join(", ")) } else { help };
     Some(format!("  {name}{required}{}", if help.is_empty() { String::new() } else { format!(": {help}") }))
 }
 
@@ -77,7 +80,7 @@ fn reference(command: &clap::Command, prefix: &str, out: &mut Vec<String>) {
 
 /// Generated from the CLI itself, so the guide never lists a command the binary doesn't have.
 pub fn command_reference() -> String {
-    let mut lines = vec!["## Commands".to_string(), String::new(), "Every read command takes `--json`; agents should always use it.".to_string(), String::new()];
+    let mut lines = vec!["## Commands".to_string(), String::new(), "A command that has `--json` lists it in its arguments below; agents should always pass it where it exists. Commands without it print a sentence when they change something, and `reviewers model`, `reviewers classifier cutoff` and `reviewers upgrade --check` print a single value. A flag listed without `<VALUE>` takes no value: `--json`, never `--json true`.".to_string(), String::new()];
     reference(&crate::Cli::command(), "reviewers", &mut lines);
     lines.join("\n")
 }
