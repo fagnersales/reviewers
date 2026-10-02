@@ -64,6 +64,7 @@
     opacity: 0; pointer-events: none; transition: opacity .12s; z-index: 2;
   }
   .tip:hover::after, .tip:focus::after { opacity: 1; }
+  .untested { color: var(--faint); text-decoration-color: var(--faint); }
   /* Hidden tooltips still count toward the page's width; anchoring them right keeps them off the edge. */
   .meta .tip::after { left: auto; right: 0; transform: none; max-width: min(280px, 80vw); }
 
@@ -180,7 +181,7 @@
     </section>
     <section class="feature">
       <h2>Agents know how to use it</h2>
-      <p>The installer gives Claude Code, Codex, Cursor and OpenCode a skill that points to <a href="/docs/">reviewers help --agent</a>, which updates with every release.</p>
+      <p>The installer gives Claude Code, <s class="tip untested" tabindex="0" data-tip="Not tested yet">Codex, Cursor and OpenCode</s> a skill that points to <a href="/docs/">reviewers help --agent</a>, which updates with every release.</p>
     </section>
     <section class="feature">
       <h2>Tiny native binary</h2>
