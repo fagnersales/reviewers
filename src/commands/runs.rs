@@ -24,9 +24,10 @@ pub fn status(json_output: bool) -> Outcome {
     }
     let enabled = reviewers.iter().filter(|reviewer| reviewer.enabled).count();
     println!("{} {}", ui::bold(&project.name), ui::dim(&format!("· {} on · {} off", enabled, reviewers.len() - enabled)));
-    let hooked = hooks.iter().all(|(_, state)| matches!(state, Some(crate::hooks::HookState::Installed)));
-    if !hooked {
-        println!("{}", ui::yellow("The commit hook isn't installed here; `reviewers hooks install` fixes it."));
+    if project.ignored {
+        println!("{}", ui::yellow("Ignored: no Reviewer judges this repo. `reviewers init` turns them back on."));
+    } else if !crate::hooks::covered(std::path::Path::new(&project.root)) {
+        println!("{}", ui::yellow("The commit hook isn't installed here; `reviewers hooks install` fixes it, or `reviewers hooks install --global` for every repo."));
     }
     match crate::classifier::connected() {
         Some(connection) => println!("{}", ui::dim(&format!("Classifier: {} · `reviewers classifier` for its cutoffs", connection.provider.label()))),

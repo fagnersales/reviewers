@@ -30,6 +30,10 @@ A commit that ends "could not reach a verdict" means a Reviewer crashed or timed
 
 When one is connected (`reviewers classifier status --json`), it clears the Reviewers a change can't concern before any session starts. After connecting it, run `reviewers classifier check --json`: for any Reviewer with `missedBlocks`, set a cutoff under its `lowestBlockScore` (`reviewers edit <name> --classifier 0.1`) or turn it off for that Reviewer (`--classifier off`). `reviewers help classifier` has the rest.
 
+## Repos
+
+`reviewers hooks status --json` says whether the global hooks are on. With them, every repo runs the Reviewers meant for every repo, and a new repo needs nothing; without them, `reviewers init` starts judging one. A repo that sets its own hooks folder (husky, lefthook) needs `reviewers init` either way. `reviewers ignore` stops Reviewers in a repo the person doesn't want judged.
+
 ## Data
 
 Everything lives in `~/.reviewers/reviewers.sqlite` on this machine. Diffs go to the model through the person's own Claude Code, and, when a classifier is connected, to its provider.
@@ -214,13 +218,27 @@ Start judging this repo (or PATH): register it and install its hooks
 
   <PATH>
 
+### `reviewers ignore`
+
+Stop judging this repo (or PATH), even under the global hooks. `reviewers init` undoes it
+
+  <PATH>
+
 ### `reviewers hooks install`
 
-Install the hooks in this repo (or PATH), or in every repo with --all
+Install the hooks in this repo (or PATH), in every registered repo with --all, or for every repo on this machine with --global
 
   <PATH>
   --all: one of `true`, `false`
   --take-over: Replace Personal Workspace's hooks; one of `true`, `false`
+  --global: Through git's global core.hooksPath: every repo, new ones included, with no setup. Each repo's own hooks still run; one of `true`, `false`
+
+### `reviewers hooks uninstall`
+
+Remove the hooks from this repo (or PATH), or the global ones with --global, setting back what was there before
+
+  <PATH>
+  --global: one of `true`, `false`
 
 ### `reviewers hooks status`
 
@@ -379,13 +397,15 @@ The person picks the repos and the model (the default is the one they used most 
 
 A rule must have come up at least twice, or have been stated as a standing rule ("always", "never"). Rules a linter could enforce are listed apart.
 
-At the end the person picks which Reviewers start on, and the commit hook is installed in the picked repos. Everything found, and every piece of evidence, is kept in `~/.reviewers/onboard/<date>/`.
+At the end the person picks which Reviewers start on, and the global hooks are installed so every repo runs them, with each repo's own hooks still running first. Everything found, and every piece of evidence, is kept in `~/.reviewers/onboard/<date>/`.
 
 ---
 
 # What happens on a commit
 
-`reviewers init` registers a repo and installs two git hooks, honoring `core.hooksPath` (husky, lefthook). A hook another tool already owns is left alone; to run Reviewers from it, add this line to that tool's `commit-msg` hook:
+`reviewers hooks install --global` covers every repo on the machine through git's global `core.hooksPath`, new repos and fresh clones included, with no setup. Under a global hooks folder git stops running each repo's own hooks, so every hook in it runs the repo's own first (`pre-commit`, `pre-push` and the rest). A global hooks folder set before keeps running in their place, as git did, and `reviewers hooks uninstall --global` sets it back. A repo nobody added is registered on its first commit when a Reviewer applies to every repo. `reviewers ignore` stops Reviewers judging a repo; `reviewers init` turns them back on.
+
+Without the global hooks, `reviewers init` registers one repo and installs two hooks in it. A repo that sets its own `core.hooksPath` (husky, lefthook) always needs this, since git prefers its own folder over the global one. A hook another tool already owns is left alone; to run Reviewers from it, add this line to that tool's `commit-msg` hook:
 
 ```sh
 reviewers hook commit-msg "$1"

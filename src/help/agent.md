@@ -30,6 +30,10 @@ A commit that ends "could not reach a verdict" means a Reviewer crashed or timed
 
 When one is connected (`reviewers classifier status --json`), it clears the Reviewers a change can't concern before any session starts. After connecting it, run `reviewers classifier check --json`: for any Reviewer with `missedBlocks`, set a cutoff under its `lowestBlockScore` (`reviewers edit <name> --classifier 0.1`) or turn it off for that Reviewer (`--classifier off`). `reviewers help classifier` has the rest.
 
+## Repos
+
+`reviewers hooks status --json` says whether the global hooks are on. With them, every repo runs the Reviewers meant for every repo, and a new repo needs nothing; without them, `reviewers init` starts judging one. A repo that sets its own hooks folder (husky, lefthook) needs `reviewers init` either way. `reviewers ignore` stops Reviewers in a repo the person doesn't want judged.
+
 ## Data
 
 Everything lives in `~/.reviewers/reviewers.sqlite` on this machine. Diffs go to the model through the person's own Claude Code, and, when a classifier is connected, to its provider.

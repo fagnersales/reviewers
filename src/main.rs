@@ -138,6 +138,10 @@ pub enum Command {
     Init {
         path: Option<std::path::PathBuf>,
     },
+    /// Stop judging this repo (or PATH), even under the global hooks. `reviewers init` undoes it.
+    Ignore {
+        path: Option<std::path::PathBuf>,
+    },
     /// The git hooks that run Reviewers.
     #[command(subcommand)]
     Hooks(commands::repos::HooksCommand),

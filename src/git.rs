@@ -53,10 +53,49 @@ pub fn main_checkout(root: &Path) -> PathBuf {
     }
 }
 
-/// Where Git looks for hooks, honoring `core.hooksPath` (husky, lefthook) and worktrees.
+/// The repo's own `core.hooksPath` (husky, lefthook), if it sets one. A relative path is taken
+/// from the top of the working tree, where git runs hooks.
+pub fn local_hooks_path(root: &Path) -> Option<PathBuf> {
+    let output = run(root, &["config", "--local", "--get", "core.hooksPath"], &[]);
+    let value = output.stdout.trim();
+    if !output.ok || value.is_empty() {
+        return None;
+    }
+    let path = match value.strip_prefix("~/") {
+        Some(rest) => crate::util::home().join(rest),
+        None => PathBuf::from(value),
+    };
+    Some(if path.is_absolute() { path } else { root.join(path) })
+}
+
+/// Where this repo's own hooks live: its own `core.hooksPath` if it sets one, else the hooks
+/// folder its worktrees share. A global `core.hooksPath` isn't followed: that's every repo's
+/// layer, not this one's.
 pub fn hooks_dir(root: &Path) -> Result<PathBuf, String> {
-    let path = ok(root, &["rev-parse", "--path-format=absolute", "--git-path", "hooks"])?;
-    Ok(PathBuf::from(path.trim()))
+    if let Some(path) = local_hooks_path(root) {
+        return Ok(path);
+    }
+    let common = ok(root, &["rev-parse", "--path-format=absolute", "--git-common-dir"])?;
+    Ok(PathBuf::from(common.trim()).join("hooks"))
+}
+
+pub fn global_config(key: &str) -> Option<String> {
+    let output = run(&crate::util::home(), &["config", "--global", "--get", key], &[]);
+    let value = output.stdout.trim().to_string();
+    (output.ok && !value.is_empty()).then_some(value)
+}
+
+/// Sets a key in the global git config, or unsets it with `None`.
+pub fn set_global_config(key: &str, value: Option<&str>) -> Result<(), String> {
+    let home = crate::util::home();
+    match value {
+        Some(value) => ok(&home, &["config", "--global", key, value]).map(|_| ()),
+        // Exit 5 means it wasn't set, which is the goal anyway.
+        None => {
+            let output = run(&home, &["config", "--global", "--unset", key], &[]);
+            if output.ok || output.stderr.trim().is_empty() { Ok(()) } else { Err(format!("git config --global --unset {key} failed: {}", output.stderr.trim())) }
+        }
+    }
 }
 
 pub fn remote_url(root: &Path) -> Option<String> {

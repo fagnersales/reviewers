@@ -9,7 +9,9 @@ CREATE TABLE projects (
   root TEXT NOT NULL UNIQUE,
   remote TEXT,
   model TEXT,
-  created_at TEXT NOT NULL
+  created_at TEXT NOT NULL,
+  -- Set with `reviewers ignore`: no Reviewer judges this repo, even under the global hooks.
+  ignored INTEGER NOT NULL DEFAULT 0
 );
 
 -- `everywhere` Reviewers judge every registered repo; `projects` ones only

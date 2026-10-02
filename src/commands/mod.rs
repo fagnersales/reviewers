@@ -63,6 +63,7 @@ pub fn dispatch(command: Option<Command>) -> Outcome {
         Some(Command::Evals { reviewer, limit, delete, output }) => crate::evals::history(&reviewer, limit, delete.as_deref(), output.json),
         Some(Command::Repos(output)) => repos::list(output.json),
         Some(Command::Init { path }) => repos::init(path),
+        Some(Command::Ignore { path }) => repos::ignore(path),
         Some(Command::Hooks(command)) => repos::hooks(command),
         Some(Command::Model { model, repo }) => repos::model(model, repo),
         Some(Command::Import(args)) => crate::import::run(args),

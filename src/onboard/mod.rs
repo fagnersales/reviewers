@@ -699,15 +699,20 @@ fn activate(store: &Store, suggestions: &[Suggestion], chosen: &[&RepoSummary], 
         on += usize::from(*enabled);
     }
     let install = if interactive {
-        ui::confirm(&format!("Install the commit hook in {}?", plural(projects.len(), "repo")), true).unwrap_or(false)
+        ui::confirm("Run Reviewers on every commit, in every repo? (git's global hooks; each repo's own hooks still run)", true).unwrap_or(false)
     } else {
         yes
     };
     let mut hooked = 0;
     if install {
+        // Every repo, new ones included, with no setup; a repo with its own hooks folder gets the hooks there.
+        if let Err(error) = hooks::install_global(store) {
+            ui::line(&format!("{} {}", ui::red("✗"), ui::dim(&format!("global hooks: {error}"))));
+        }
         for (name, project) in &projects {
-            match hooks::install(Path::new(&project.root), false) {
-                Ok(states) => {
+            match hooks::cover(Path::new(&project.root), false) {
+                Ok(hooks::Coverage::Global) => hooked += 1,
+                Ok(hooks::Coverage::Repo(states)) => {
                     let ours = states.iter().all(|(_, state)| matches!(state, hooks::HookState::Installed | hooks::HookState::Updated));
                     hooked += usize::from(ours);
                     if !ours {

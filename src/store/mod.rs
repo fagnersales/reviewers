@@ -13,7 +13,7 @@ fn db_error(error: rusqlite::Error) -> String {
 }
 
 const SCHEMA: &str = include_str!("schema.sql");
-const SCHEMA_VERSION: i64 = 3;
+const SCHEMA_VERSION: i64 = 4;
 
 /// Each step takes a database from the version before it to the next one.
 const MIGRATIONS: &[(i64, &str)] = &[
@@ -28,6 +28,7 @@ const MIGRATIONS: &[(i64, &str)] = &[
         "ALTER TABLE reviewers ADD COLUMN classifier TEXT NOT NULL DEFAULT 'default';
          ALTER TABLE decisions ADD COLUMN classifier TEXT;",
     ),
+    (4, "ALTER TABLE projects ADD COLUMN ignored INTEGER NOT NULL DEFAULT 0;"),
 ];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -128,6 +129,8 @@ pub struct Project {
     pub remote: Option<String>,
     pub model: Option<String>,
     pub created_at: String,
+    /// No Reviewer judges it (`reviewers ignore`).
+    pub ignored: bool,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -424,6 +427,7 @@ impl Store {
             remote: row.get("remote")?,
             model: row.get("model")?,
             created_at: row.get("created_at")?,
+            ignored: row.get::<_, i64>("ignored")? != 0,
         })
     }
 
@@ -460,6 +464,7 @@ impl Store {
             remote: remote.map(str::to_string),
             model: None,
             created_at: now_iso(),
+            ignored: false,
         };
         self.insert_project(&project)?;
         Ok(project)
@@ -468,11 +473,15 @@ impl Store {
     pub fn insert_project(&self, project: &Project) -> Result<()> {
         self.connection
             .execute(
-                "INSERT OR IGNORE INTO projects (id, name, root, remote, model, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                params![project.id, project.name, project.root, project.remote, project.model, project.created_at],
+                "INSERT OR IGNORE INTO projects (id, name, root, remote, model, created_at, ignored) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                params![project.id, project.name, project.root, project.remote, project.model, project.created_at, project.ignored as i64],
             )
             .map(|_| ())
             .map_err(db_error)
+    }
+
+    pub fn set_ignored(&self, id: &str, ignored: bool) -> Result<()> {
+        self.connection.execute("UPDATE projects SET ignored = ?2 WHERE id = ?1", params![id, ignored as i64]).map(|_| ()).map_err(db_error)
     }
 
     pub fn set_project_model(&self, id: &str, model: Option<&str>) -> Result<()> {
@@ -1190,6 +1199,7 @@ mod tests {
                  ALTER TABLE decisions DROP COLUMN reused_from;
                  ALTER TABLE decisions DROP COLUMN classifier;
                  ALTER TABLE reviewers DROP COLUMN classifier;
+                 ALTER TABLE projects DROP COLUMN ignored;
                  PRAGMA user_version = 1;",
             )
             .unwrap();

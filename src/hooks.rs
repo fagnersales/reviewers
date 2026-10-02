@@ -1,5 +1,5 @@
 use crate::review::{self, EXIT_APPROVED, EXIT_FAILED};
-use crate::store::{Project, RunKind, Store};
+use crate::store::{Project, RunKind, Scope, Store};
 use crate::{diff, git, scope};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
@@ -9,6 +9,35 @@ const MARKER: &str = "# managed by reviewers";
 const WORKSPACE_MARKER: &str = "# Personal Workspace hook";
 
 pub const HOOKS: [&str; 2] = ["commit-msg", "post-commit"];
+
+/// Every hook git looks for in a hooks folder. Under a global `core.hooksPath` git stops reading
+/// each repo's own folder, so the global one carries them all, each handing over to the repo's
+/// own. `push-to-checkout` and `proc-receive` are left out: their mere presence changes what git does.
+const EVERY_HOOK: &[&str] = &[
+    "applypatch-msg",
+    "pre-applypatch",
+    "post-applypatch",
+    "pre-commit",
+    "pre-merge-commit",
+    "prepare-commit-msg",
+    "commit-msg",
+    "post-commit",
+    "pre-rebase",
+    "post-checkout",
+    "post-merge",
+    "pre-push",
+    "pre-receive",
+    "update",
+    "post-receive",
+    "post-update",
+    "reference-transaction",
+    "pre-auto-gc",
+    "post-rewrite",
+    "sendemail-validate",
+    "post-index-change",
+];
+
+const PREVIOUS_GLOBAL_SETTING: &str = "previous_global_hooks_path";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum HookState {
@@ -32,20 +61,135 @@ fn binary_path() -> String {
 /// Git hands hooks a bare environment, so the binary is named by path, with
 /// PATH as the fallback; a missing binary lets the commit through rather than
 /// blocking every commit forever.
-fn script(hook: &str) -> String {
-    let (purpose, arguments) = match hook {
-        "commit-msg" => ("Reviewers judge every commit; a block stops it.", " \"$1\""),
-        _ => ("Ties the landed commit to the review that let it through.", ""),
-    };
+fn call_reviewers(hook: &str) -> String {
+    let arguments = if hook == "commit-msg" { " \"$1\"" } else { "" };
     format!(
-        "#!/bin/sh\n{MARKER}: {purpose}\n# Reinstall with `reviewers hooks install`. Skip once with REVIEWERS_BYPASS=1.\n\
-[ \"$REVIEWERS_BYPASS\" = \"1\" ] && exit 0\n\
+        "[ \"$REVIEWERS_BYPASS\" = \"1\" ] && exit 0\n\
 REVIEWERS=\"{}\"\n\
 [ -x \"$REVIEWERS\" ] || REVIEWERS=\"$(command -v reviewers)\"\n\
 [ -n \"$REVIEWERS\" ] || {{ echo \"reviewers: not installed; this commit was not reviewed\" >&2; exit 0; }}\n\
 exec \"$REVIEWERS\" hook {hook}{arguments}\n",
         binary_path()
     )
+}
+
+fn script(hook: &str) -> String {
+    let purpose = match hook {
+        "commit-msg" => "Reviewers judge every commit; a block stops it.",
+        _ => "Ties the landed commit to the review that let it through.",
+    };
+    format!("#!/bin/sh\n{MARKER}: {purpose}\n# Reinstall with `reviewers hooks install`. Skip once with REVIEWERS_BYPASS=1.\n{}", call_reviewers(hook))
+}
+
+/// A hook in the global folder: it first runs the hook git would have run without it (the repo's
+/// own, or the global folder that was set before), skipping a repo's own copy of Reviewers' hooks
+/// so a commit isn't judged twice. The commit hooks then run Reviewers.
+fn global_script(hook: &str, previous: Option<&str>) -> String {
+    let own = match previous {
+        Some(folder) => format!("{}/{hook}", folder.trim_end_matches('/')),
+        None => format!("$(git rev-parse --git-common-dir 2>/dev/null)/hooks/{hook}"),
+    };
+    let header = format!(
+        "#!/bin/sh\n{MARKER} (global hooks): a global core.hooksPath hides each repo's own hooks, so this runs\n\
+# the {hook} hook git would have run. Remove with `reviewers hooks uninstall --global`.\n\
+own=\"{own}\"\n"
+    );
+    let foreign = format!("[ -x \"$own\" ] && ! grep -q \"{MARKER}\" \"$own\" 2>/dev/null");
+    match hook {
+        "commit-msg" => format!("{header}if {foreign}; then\n  \"$own\" \"$@\" || exit $?\nfi\n{}", call_reviewers(hook)),
+        "post-commit" => format!("{header}if {foreign}; then\n  \"$own\" \"$@\"\nfi\n{}", call_reviewers(hook)),
+        _ => format!("{header}{foreign} && exec \"$own\" \"$@\"\nexit 0\n"),
+    }
+}
+
+pub fn global_dir() -> PathBuf {
+    crate::util::data_dir().join("hooks")
+}
+
+fn same_folder(path: &str, folder: &Path) -> bool {
+    let path = Path::new(path);
+    path == folder || path.canonicalize().ok().is_some_and(|path| folder.canonicalize().ok().is_some_and(|folder| path == folder))
+}
+
+/// Whether git's global `core.hooksPath` points at Reviewers' folder.
+pub fn global_installed() -> bool {
+    git::global_config("core.hooksPath").is_some_and(|path| same_folder(&path, &global_dir()))
+}
+
+pub struct GlobalInstall {
+    /// The global hooks folder that was set before, still run by every hook.
+    pub previous: Option<String>,
+    pub updated: bool,
+}
+
+/// Points git's global `core.hooksPath` at Reviewers' folder, so every repo on the machine runs
+/// Reviewers with no setup. A global hooks folder set before keeps running in place of each
+/// repo's own hooks, as git did before; uninstalling sets it back.
+pub fn install_global(store: &Store) -> Result<GlobalInstall, String> {
+    let directory = global_dir();
+    let current = git::global_config("core.hooksPath");
+    let updated = current.as_deref().is_some_and(|path| same_folder(path, &directory));
+    if let Some(path) = current.as_deref().filter(|_| !updated) {
+        store.set_setting(PREVIOUS_GLOBAL_SETTING, Some(path))?;
+    }
+    let previous = store.setting(PREVIOUS_GLOBAL_SETTING)?;
+    std::fs::create_dir_all(&directory).map_err(|error| format!("cannot create {}: {error}", directory.display()))?;
+    for hook in EVERY_HOOK {
+        write_executable(&directory.join(hook), &global_script(hook, previous.as_deref()))?;
+    }
+    git::set_global_config("core.hooksPath", Some(&directory.display().to_string()))?;
+    Ok(GlobalInstall { previous, updated })
+}
+
+/// Sets git's global `core.hooksPath` back to what it was, and removes the folder.
+pub fn uninstall_global(store: &Store) -> Result<bool, String> {
+    let installed = global_installed();
+    if installed {
+        let previous = store.setting(PREVIOUS_GLOBAL_SETTING)?;
+        git::set_global_config("core.hooksPath", previous.as_deref())?;
+        store.set_setting(PREVIOUS_GLOBAL_SETTING, None)?;
+    }
+    if global_dir().exists() {
+        std::fs::remove_dir_all(global_dir()).map_err(|error| format!("cannot remove {}: {error}", global_dir().display()))?;
+    }
+    Ok(installed)
+}
+
+pub enum Coverage {
+    /// The global hooks reach it; nothing was written in the repo.
+    Global,
+    Repo(Vec<(&'static str, HookState)>),
+}
+
+/// Makes sure commits here reach Reviewers. The global hooks cover a repo unless it sets its own
+/// hooks folder (husky, lefthook), which git prefers; then the hooks go in that folder.
+pub fn cover(root: &Path, take_over_workspace: bool) -> Result<Coverage, String> {
+    if git::local_hooks_path(root).is_none() && global_installed() {
+        return Ok(Coverage::Global);
+    }
+    install(root, take_over_workspace).map(Coverage::Repo)
+}
+
+/// Whether a commit here runs Reviewers.
+pub fn covered(root: &Path) -> bool {
+    if git::local_hooks_path(root).is_none() && global_installed() {
+        return true;
+    }
+    state_of(root).is_ok_and(|states| states.iter().all(|(_, state)| *state == Some(HookState::Installed)))
+}
+
+/// Removes Reviewers' hooks from this repo's own hooks folder; another tool's are left alone.
+pub fn uninstall(root: &Path) -> Result<Vec<&'static str>, String> {
+    let directory = git::hooks_dir(root)?;
+    let mut removed = Vec::new();
+    for hook in HOOKS {
+        let path = directory.join(hook);
+        if std::fs::read_to_string(&path).is_ok_and(|content| content.contains(MARKER)) {
+            std::fs::remove_file(&path).map_err(|error| format!("cannot remove {}: {error}", path.display()))?;
+            removed.push(hook);
+        }
+    }
+    Ok(removed)
 }
 
 pub fn state_of(root: &Path) -> Result<Vec<(&'static str, Option<HookState>)>, String> {
@@ -107,6 +251,18 @@ fn project_for(store: &Store, root: &Path) -> Result<Option<Project>, String> {
     store.project_by_root(&git::main_checkout(root).display().to_string())
 }
 
+/// Under the global hooks, a repo nobody added still answers to the Reviewers meant for every
+/// repo. It's registered on its first such commit, so its reviews have a place in the history.
+fn adopt(store: &Store, root: &Path) -> Result<Option<Project>, String> {
+    if !store.reviewers()?.iter().any(|reviewer| reviewer.enabled && reviewer.scope == Scope::Everywhere) {
+        return Ok(None);
+    }
+    let main = git::main_checkout(root);
+    let project = store.ensure_project(&main.display().to_string(), git::remote_url(&main).as_deref())?;
+    eprintln!("reviewers: judging {} from now on; `reviewers ignore` in it turns that off", project.name);
+    Ok(Some(project))
+}
+
 fn bypassed() -> bool {
     std::env::var("REVIEWERS_BYPASS").is_ok_and(|value| value == "1")
 }
@@ -127,9 +283,12 @@ pub fn commit_msg(message_file: Option<&str>) -> i32 {
             return EXIT_FAILED;
         }
     };
-    let project = match project_for(&store, &root) {
-        Ok(Some(project)) => project,
-        Ok(None) => return EXIT_APPROVED,
+    let project = match project_for(&store, &root).and_then(|found| match found {
+        Some(project) => Ok(Some(project)),
+        None => adopt(&store, &root),
+    }) {
+        Ok(Some(project)) if !project.ignored => project,
+        Ok(_) => return EXIT_APPROVED,
         Err(error) => {
             eprintln!("reviewers: {error}");
             return EXIT_FAILED;
@@ -206,6 +365,9 @@ pub fn post_commit() -> i32 {
     let Ok(Some(project)) = project_for(&store, &root) else {
         return 0;
     };
+    if project.ignored {
+        return 0;
+    }
     let Ok(info) = git::commit_info(&root, "HEAD") else {
         return 0;
     };

@@ -6,4 +6,4 @@ The person picks the repos and the model (the default is the one they used most 
 
 A rule must have come up at least twice, or have been stated as a standing rule ("always", "never"). Rules a linter could enforce are listed apart.
 
-At the end the person picks which Reviewers start on, and the commit hook is installed in the picked repos. Everything found, and every piece of evidence, is kept in `~/.reviewers/onboard/<date>/`.
+At the end the person picks which Reviewers start on, and the global hooks are installed so every repo runs them, with each repo's own hooks still running first. Everything found, and every piece of evidence, is kept in `~/.reviewers/onboard/<date>/`.
