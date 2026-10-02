@@ -26,6 +26,10 @@ A commit that ends "could not reach a verdict" means a Reviewer crashed or timed
 
 `reviewers stats --json` (this repo) or `--all`: commits judged, blocks, wait, tokens, and per Reviewer: block rate, time, tokens per catch, and `neverBlocks` for one that hasn't blocked in 50+ runs. A Reviewer that never blocks is a candidate for a lint rule or for turning off. Draw a chart when it helps; the data is all in the JSON.
 
+## The classifier
+
+When one is connected (`reviewers classifier status --json`), it clears the Reviewers a change can't concern before any session starts. After connecting it, run `reviewers classifier check --json`: for any Reviewer with `missedBlocks`, set a cutoff under its `lowestBlockScore` (`reviewers edit <name> --classifier 0.1`) or turn it off for that Reviewer (`--classifier off`). `reviewers help classifier` has the rest.
+
 ## Data
 
-Everything lives in `~/.reviewers/reviewers.sqlite` on this machine. Nothing is sent anywhere except to the model, through the person's own Claude Code.
+Everything lives in `~/.reviewers/reviewers.sqlite` on this machine. Diffs go to the model through the person's own Claude Code, and, when a classifier is connected, to its provider.

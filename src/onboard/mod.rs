@@ -4,7 +4,7 @@ pub mod transcripts;
 use crate::claude::{self, Activity, Request, Tokens};
 use crate::commands::Outcome;
 use crate::commands::onboard::OnboardArgs;
-use crate::store::{NewReviewer, Scope, Store};
+use crate::store::{ClassifierUse, NewReviewer, Scope, Store};
 use crate::util::{compact, duration, home_path, plural, slugify, str_field, thousands};
 use crate::{git, hooks, skill, ui};
 use digest::{Job, RepoSummary};
@@ -693,6 +693,7 @@ fn activate(store: &Store, suggestions: &[Suggestion], chosen: &[&RepoSummary], 
             context_files: Vec::new(),
             enabled: *enabled,
             model: None,
+            classifier: ClassifierUse::Default,
             origin: json!({ "kind": "onboard", "why": suggestion.why, "timesSeen": suggestion.times_seen, "evidence": suggestion.evidence, "run": run_directory }),
         })?;
         on += usize::from(*enabled);

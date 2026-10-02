@@ -1,4 +1,5 @@
 mod claude;
+mod classifier;
 mod commands;
 mod diff;
 mod evals;
@@ -150,6 +151,11 @@ pub enum Command {
     },
     /// Bring over Reviewers, history and evals from Personal Workspace.
     Import(import::ImportArgs),
+    /// The classifier: a cheap first pass that skips Reviewers a change can't concern.
+    Classifier {
+        #[command(subcommand)]
+        command: Option<commands::classifier::ClassifierCommand>,
+    },
     /// The skill that tells your coding agents Reviewers exist.
     #[command(subcommand)]
     Skill(skill::SkillCommand),

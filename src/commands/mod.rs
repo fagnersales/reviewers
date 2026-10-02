@@ -1,3 +1,4 @@
+pub mod classifier;
 pub mod onboard;
 pub mod repos;
 pub mod reviewers;
@@ -65,6 +66,7 @@ pub fn dispatch(command: Option<Command>) -> Outcome {
         Some(Command::Hooks(command)) => repos::hooks(command),
         Some(Command::Model { model, repo }) => repos::model(model, repo),
         Some(Command::Import(args)) => crate::import::run(args),
+        Some(Command::Classifier { command }) => classifier::run(command),
         Some(Command::Skill(command)) => crate::skill::run(command),
         Some(Command::Upgrade(args)) => crate::upgrade::run(args),
         Some(Command::Help(args)) => crate::help::run(args),

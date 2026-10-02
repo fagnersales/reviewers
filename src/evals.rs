@@ -597,6 +597,7 @@ mod tests {
                 context_files: Vec::new(),
                 enabled: true,
                 model: None,
+                classifier: crate::store::ClassifierUse::Default,
                 origin: json!({}),
             })
             .unwrap();

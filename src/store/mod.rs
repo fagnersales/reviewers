@@ -1,3 +1,4 @@
+use crate::classifier::Classified;
 use crate::util::{new_id, now_iso, slugify};
 use rusqlite::{Connection, OptionalExtension, Row, params};
 use serde::{Deserialize, Serialize};
@@ -12,15 +13,22 @@ fn db_error(error: rusqlite::Error) -> String {
 }
 
 const SCHEMA: &str = include_str!("schema.sql");
-const SCHEMA_VERSION: i64 = 2;
+const SCHEMA_VERSION: i64 = 3;
 
 /// Each step takes a database from the version before it to the next one.
-const MIGRATIONS: &[(i64, &str)] = &[(
-    2,
-    "ALTER TABLE decisions ADD COLUMN input_hash TEXT;
-     ALTER TABLE decisions ADD COLUMN reused_from TEXT;
-     CREATE INDEX decisions_input ON decisions(input_hash);",
-)];
+const MIGRATIONS: &[(i64, &str)] = &[
+    (
+        2,
+        "ALTER TABLE decisions ADD COLUMN input_hash TEXT;
+         ALTER TABLE decisions ADD COLUMN reused_from TEXT;
+         CREATE INDEX decisions_input ON decisions(input_hash);",
+    ),
+    (
+        3,
+        "ALTER TABLE reviewers ADD COLUMN classifier TEXT NOT NULL DEFAULT 'default';
+         ALTER TABLE decisions ADD COLUMN classifier TEXT;",
+    ),
+];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -78,6 +86,39 @@ impl RunKind {
     }
 }
 
+/// Whether the classifier may clear a Reviewer, and under what chance of a broken rule.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum ClassifierUse {
+    /// The cutoff set with `reviewers classifier cutoff`.
+    Default,
+    Off,
+    Cutoff(f64),
+}
+
+impl ClassifierUse {
+    pub fn parse(text: &str) -> Option<ClassifierUse> {
+        match text.trim() {
+            "default" => Some(ClassifierUse::Default),
+            "off" => Some(ClassifierUse::Off),
+            number => number.parse::<f64>().ok().filter(|cutoff| (0.0..=1.0).contains(cutoff)).map(ClassifierUse::Cutoff),
+        }
+    }
+
+    pub fn as_text(self) -> String {
+        match self {
+            ClassifierUse::Default => "default".into(),
+            ClassifierUse::Off => "off".into(),
+            ClassifierUse::Cutoff(cutoff) => cutoff.to_string(),
+        }
+    }
+}
+
+impl Serialize for ClassifierUse {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error> {
+        serializer.serialize_str(&self.as_text())
+    }
+}
+
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Project {
@@ -106,6 +147,7 @@ pub struct Reviewer {
     pub blocking: bool,
     pub model: Option<String>,
     pub version: i64,
+    pub classifier: ClassifierUse,
     /// Where it came from: onboarding evidence, an import, or a person.
     pub origin: Value,
     pub created_at: String,
@@ -121,6 +163,7 @@ pub struct NewReviewer {
     pub context_files: Vec<String>,
     pub enabled: bool,
     pub model: Option<String>,
+    pub classifier: ClassifierUse,
     pub origin: Value,
 }
 
@@ -133,6 +176,7 @@ pub struct ReviewerChanges {
     pub model: Option<Option<String>>,
     pub blocking: Option<bool>,
     pub scope: Option<Scope>,
+    pub classifier: Option<ClassifierUse>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -181,6 +225,8 @@ pub struct Decision {
     /// The run whose verdict this is, when the same input was judged there and the verdict was given back instead of running again.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reused_from: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub classifier: Option<Classified>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -454,6 +500,7 @@ impl Store {
             blocking: row.get::<_, i64>("blocking")? != 0,
             model: row.get("model")?,
             version: row.get("version")?,
+            classifier: ClassifierUse::parse(&row.get::<_, String>("classifier")?).unwrap_or(ClassifierUse::Default),
             origin: serde_json::from_str(&origin).unwrap_or(Value::Null),
             created_at: row.get("created_at")?,
             updated_at: row.get("updated_at")?,
@@ -552,8 +599,8 @@ impl Store {
         let slug = self.free_slug(&input.name, None)?;
         self.connection
             .execute(
-                "INSERT INTO reviewers (id, slug, name, instruction, scope, paths, context_files, enabled, blocking, model, version, origin, created_at, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 1, ?9, 1, ?10, ?11, ?11)",
+                "INSERT INTO reviewers (id, slug, name, instruction, scope, paths, context_files, enabled, blocking, model, version, origin, created_at, updated_at, classifier)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 1, ?9, 1, ?10, ?11, ?11, ?12)",
                 params![
                     id,
                     slug,
@@ -565,7 +612,8 @@ impl Store {
                     input.enabled as i64,
                     input.model,
                     to_json(&input.origin),
-                    now
+                    now,
+                    input.classifier.as_text()
                 ],
             )
             .map_err(db_error)?;
@@ -581,8 +629,8 @@ impl Store {
         let inserted = self
             .connection
             .execute(
-                "INSERT OR IGNORE INTO reviewers (id, slug, name, instruction, scope, paths, context_files, enabled, blocking, model, version, origin, created_at, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+                "INSERT OR IGNORE INTO reviewers (id, slug, name, instruction, scope, paths, context_files, enabled, blocking, model, version, origin, created_at, updated_at, classifier)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
                 params![
                     reviewer.id,
                     slug,
@@ -597,7 +645,8 @@ impl Store {
                     reviewer.version,
                     to_json(&reviewer.origin),
                     reviewer.created_at,
-                    reviewer.updated_at
+                    reviewer.updated_at,
+                    reviewer.classifier.as_text()
                 ],
             )
             .map_err(db_error)?;
@@ -619,7 +668,7 @@ impl Store {
         self.connection
             .execute(
                 "UPDATE reviewers SET slug = ?2, name = ?3, instruction = ?4, paths = ?5, context_files = ?6, model = ?7,
-                   blocking = ?8, scope = ?9, version = ?10, updated_at = ?11 WHERE id = ?1",
+                   blocking = ?8, scope = ?9, version = ?10, updated_at = ?11, classifier = ?12 WHERE id = ?1",
                 params![
                     id,
                     slug,
@@ -631,7 +680,8 @@ impl Store {
                     changes.blocking.unwrap_or(current.blocking) as i64,
                     scope.as_str(),
                     version,
-                    now_iso()
+                    now_iso(),
+                    changes.classifier.unwrap_or(current.classifier).as_text()
                 ],
             )
             .map_err(db_error)?;
@@ -697,8 +747,8 @@ impl Store {
             transaction
                 .execute(
                     "INSERT OR IGNORE INTO decisions (id, run_id, reviewer_id, reviewer_name, reviewer_version, instruction, verdict, summary, reasoning,
-                       evidence, session, model, duration_ms, tokens_read, tokens_written, turns, tool_calls, input_hash, reused_from)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)",
+                       evidence, session, model, duration_ms, tokens_read, tokens_written, turns, tool_calls, input_hash, reused_from, classifier)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)",
                     params![
                         decision.id,
                         run.id,
@@ -718,7 +768,8 @@ impl Store {
                         decision.usage.turns,
                         decision.usage.tool_calls,
                         decision.input_hash,
-                        decision.reused_from
+                        decision.reused_from,
+                        decision.classifier.as_ref().map(to_json)
                     ],
                 )
                 .map_err(db_error)?;
@@ -755,7 +806,23 @@ impl Store {
             },
             input_hash: row.get("input_hash")?,
             reused_from: row.get("reused_from")?,
+            classifier: row.get::<_, Option<String>>("classifier")?.and_then(|text| serde_json::from_str(&text).ok()),
         })
+    }
+
+    /// How many commit-hook decisions the classifier cleared, escalated or couldn't answer since a date.
+    pub fn classifier_outcomes(&self, since: &str) -> Result<Vec<(String, u64)>> {
+        let mut statement = self
+            .connection
+            .prepare(
+                "SELECT json_extract(d.classifier, '$.outcome') AS outcome, count(*) AS count FROM decisions d JOIN runs r ON r.id = d.run_id
+                 WHERE r.kind = 'review' AND d.classifier IS NOT NULL AND r.started_at >= ?1 GROUP BY outcome",
+            )
+            .map_err(db_error)?;
+        let rows = statement
+            .query_map([since], |row| Ok((row.get::<_, Option<String>>("outcome")?.unwrap_or_default(), row.get::<_, i64>("count")? as u64)))
+            .map_err(db_error)?;
+        rows.collect::<rusqlite::Result<Vec<_>>>().map_err(db_error)
     }
 
     /// The latest verdict a commit review in this repo reached on exactly this input.
@@ -1121,6 +1188,8 @@ mod tests {
                 "DROP INDEX decisions_input;
                  ALTER TABLE decisions DROP COLUMN input_hash;
                  ALTER TABLE decisions DROP COLUMN reused_from;
+                 ALTER TABLE decisions DROP COLUMN classifier;
+                 ALTER TABLE reviewers DROP COLUMN classifier;
                  PRAGMA user_version = 1;",
             )
             .unwrap();

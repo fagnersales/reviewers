@@ -61,7 +61,9 @@ pub fn report(run: &Run, paint: &Paint) -> String {
         return lines.join("\n");
     }
     if blocked.is_empty() {
-        return format!("{PREFIX} {} {footer}", paint.green(&format!("{} passed", crate::util::plural(run.decisions.len(), "Reviewer"))));
+        let cleared = run.decisions.iter().filter(|decision| decision.classifier.as_ref().is_some_and(|note| note.outcome == crate::classifier::Outcome::Cleared)).count();
+        let note = if cleared > 0 { paint.dim(&format!(" ({cleared} cleared by the classifier)")) } else { String::new() };
+        return format!("{PREFIX} {}{note} {footer}", paint.green(&format!("{} passed", crate::util::plural(run.decisions.len(), "Reviewer"))));
     }
     lines.push(format!(
         "{PREFIX} {} {footer}",

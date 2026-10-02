@@ -460,6 +460,41 @@ pub fn select(message: &str, choices: &[Choice], initial: usize) -> Option<usize
     }
 }
 
+/// A line typed without showing it, for keys. None when cancelled.
+pub fn secret(message: &str) -> Option<String> {
+    let _raw = RawMode::enter()?;
+    println!("{}\r", bar());
+    let mut value = String::new();
+    let mut frame = Frame { height: 0 };
+    loop {
+        let typed = if value.is_empty() { dim("paste it, then enter") } else { dim(&"•".repeat(value.chars().count().min(48))) };
+        frame.draw(&format!("{}  {message}\n{}  {typed}\n{}", cyan(STEP_ACTIVE), cyan(BAR), cyan(BAR_END)));
+        let Ok(Event::Key(KeyEvent { code, modifiers, kind, .. })) = event::read() else {
+            continue;
+        };
+        if kind != KeyEventKind::Press {
+            continue;
+        }
+        match code {
+            KeyCode::Enter => {
+                frame.draw(&format!("{}  {message}\n{}  {}", green(STEP_DONE), bar(), dim("received")));
+                print!("\r\n");
+                return Some(value);
+            }
+            KeyCode::Esc => break,
+            KeyCode::Char('c') if modifiers.contains(KeyModifiers::CONTROL) => break,
+            KeyCode::Backspace => {
+                value.pop();
+            }
+            KeyCode::Char(character) => value.push(character),
+            _ => {}
+        }
+    }
+    frame.draw(&format!("{}  {message}\n{}  {}", red(STEP_CANCEL), bar(), strike("cancelled")));
+    print!("\r\n");
+    None
+}
+
 pub fn confirm(message: &str, default_yes: bool) -> Option<bool> {
     let choices = [Choice { label: "Yes".into(), hint: String::new() }, Choice { label: "No".into(), hint: String::new() }];
     select(message, &choices, if default_yes { 0 } else { 1 }).map(|index| index == 0)

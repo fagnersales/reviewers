@@ -1,5 +1,5 @@
 use super::{Outcome, cwd, print_json, project_here};
-use crate::store::{NewReviewer, ReviewerChanges, Scope, Store, Verdict};
+use crate::store::{ClassifierUse, NewReviewer, ReviewerChanges, Scope, Store, Verdict};
 use crate::util::{compact, duration, plural};
 use crate::{scope, ui};
 use clap::Args;
@@ -28,6 +28,9 @@ pub struct NewArgs {
     /// Model for this Reviewer only.
     #[arg(long)]
     pub model: Option<String>,
+    /// When the classifier may skip it: `default`, `off`, or a cutoff from 0 to 1.
+    #[arg(long, value_parser = classifier_use)]
+    pub classifier: Option<ClassifierUse>,
     /// Create it turned off.
     #[arg(long)]
     pub disabled: bool,
@@ -69,6 +72,13 @@ pub struct EditArgs {
     /// Stop the commit when it blocks (the default).
     #[arg(long, conflicts_with = "advisory")]
     pub blocking: bool,
+    /// When the classifier may skip it: `default`, `off`, or a cutoff from 0 to 1.
+    #[arg(long, value_parser = classifier_use)]
+    pub classifier: Option<ClassifierUse>,
+}
+
+fn classifier_use(text: &str) -> Result<ClassifierUse, String> {
+    ClassifierUse::parse(text).ok_or_else(|| "expected `default`, `off`, or a cutoff from 0 to 1".to_string())
 }
 
 fn project_ids_for(store: &Store, paths: &[std::path::PathBuf]) -> Result<Vec<String>, String> {
@@ -209,6 +219,7 @@ pub fn new(args: NewArgs) -> Outcome {
         context_files: args.context_files.as_deref().map(scope::parse_list).unwrap_or_default(),
         enabled: !args.disabled,
         model: args.model,
+        classifier: args.classifier.unwrap_or(ClassifierUse::Default),
         origin: json!({ "kind": "manual" }),
     })?;
     println!("Created {} ({}){}", ui::bold(&reviewer.name), reviewer.slug, if reviewer.enabled { "" } else { ", turned off" });
@@ -235,6 +246,7 @@ pub fn edit(args: EditArgs) -> Outcome {
             model: args.model.map(|model| (model != "default").then_some(model)),
             blocking: if args.advisory { Some(false) } else if args.blocking { Some(true) } else { None },
             scope: scope_change,
+            classifier: args.classifier,
         },
     )?;
     for id in project_ids_for(&store, &args.add_repo)? {

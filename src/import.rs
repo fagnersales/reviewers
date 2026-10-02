@@ -1,5 +1,5 @@
 use crate::commands::Outcome;
-use crate::store::{Reviewer, Scope, Store};
+use crate::store::{ClassifierUse, Reviewer, Scope, Store};
 use crate::{hooks, ui};
 use clap::Args;
 use rusqlite::params;
@@ -57,8 +57,10 @@ pub fn run(args: ImportArgs) -> Outcome {
         let rows: Vec<Reviewer> = statement
             .query_map([], |row| {
                 let path_scope: Option<String> = row.get("path_scope")?;
-                let screen: Option<String> = row.get("screen_json")?;
+                let screen: Option<Value> = row.get::<_, Option<String>>("screen_json")?.and_then(|text| serde_json::from_str(&text).ok());
                 let harness: Option<String> = row.get("harness_id")?;
+                // A screen that scored with Jev keeps its cutoff as the classifier's.
+                let classifier = screen.as_ref().and_then(|screen| screen["judge"]["cutoff"].as_f64()).map(ClassifierUse::Cutoff).unwrap_or(ClassifierUse::Default);
                 Ok(Reviewer {
                     id: row.get("id")?,
                     slug: String::new(),
@@ -72,11 +74,12 @@ pub fn run(args: ImportArgs) -> Outcome {
                     blocking: row.get::<_, i64>("blocking")? != 0,
                     model: if harness.as_deref() == Some("claude-code") { row.get("model_id")? } else { None },
                     version: row.get("version")?,
+                    classifier,
                     origin: json!({
                         "kind": "import",
                         "from": "personal-workspace",
                         "description": row.get::<_, String>("description")?,
-                        "screen": screen.and_then(|text| serde_json::from_str::<Value>(&text).ok()),
+                        "screen": screen,
                     }),
                     created_at: row.get("created_at")?,
                     updated_at: row.get("updated_at")?,
@@ -145,8 +148,11 @@ pub fn run(args: ImportArgs) -> Outcome {
         println!("{}", ui::dim("\nYour repos still run Personal Workspace's hooks. `reviewers import --hooks` switches them to reviewers."));
     }
     let screened = store.reviewers()?.iter().filter(|reviewer| !reviewer.origin["screen"].is_null()).count();
-    if screened > 0 {
-        println!("{}", ui::dim(&format!("{screened} Reviewers had a screen; reviewers runs them in full until screens come back.")));
+    if screened > 0 && crate::classifier::connected().is_none() {
+        println!(
+            "{}",
+            ui::dim(&format!("{screened} Reviewers had a screen. Connect a classifier to skip the commits they can't concern: `reviewers help classifier`."))
+        );
     }
     Ok(0)
 }

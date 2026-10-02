@@ -122,9 +122,14 @@ pub fn show(id: &str, with_session: bool, json_output: bool) -> Outcome {
             ui::dim(&format!(
                 "v{} · {}{}",
                 decision.reviewer_version,
-                match &decision.reused_from {
-                    Some(run) => format!("unchanged since {run}, verdict given back"),
-                    None => format!(
+                match (&decision.reused_from, decision.classifier.as_ref().filter(|note| note.outcome == crate::classifier::Outcome::Cleared)) {
+                    (Some(run), _) => format!("unchanged since {run}, verdict given back"),
+                    (None, Some(note)) => format!(
+                        "cleared by the classifier: {} under the {} cutoff",
+                        crate::review::percent(note.probability.unwrap_or_default()),
+                        crate::review::percent(note.cutoff)
+                    ),
+                    (None, None) => format!(
                         "{} · {} tokens · {} tool calls",
                         duration(decision.duration_ms),
                         compact(decision.usage.tokens_read + decision.usage.tokens_written),

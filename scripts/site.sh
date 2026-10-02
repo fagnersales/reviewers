@@ -14,7 +14,7 @@ size=$(wc -c <"$binary" | awk '{ printf "%.1f MB", $1 / 1000000 }')
 cp install.sh site/install
 {
   "$binary" help --agent
-  for topic in writing evals onboarding hooks; do
+  for topic in writing evals onboarding hooks classifier; do
     printf '\n---\n\n'
     "$binary" help "$topic"
   done

@@ -27,6 +27,8 @@ CREATE TABLE reviewers (
   model TEXT,
   version INTEGER NOT NULL DEFAULT 1,
   origin TEXT NOT NULL DEFAULT '{}',
+  -- `default`, `off`, or a cutoff from 0 to 1: under it, the classifier clears the Reviewer.
+  classifier TEXT NOT NULL DEFAULT 'default',
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
@@ -83,7 +85,9 @@ CREATE TABLE decisions (
   -- The same input gets the earlier verdict back without running: then
   -- `reused_from` is the run that judged it, and this row cost no tokens.
   input_hash TEXT,
-  reused_from TEXT
+  reused_from TEXT,
+  -- What the classifier did before (or instead of) the session, as JSON.
+  classifier TEXT
 );
 CREATE INDEX decisions_run ON decisions(run_id);
 CREATE INDEX decisions_reviewer ON decisions(reviewer_id, run_id);

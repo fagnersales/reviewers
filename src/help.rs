@@ -3,7 +3,7 @@ use clap::{Args, CommandFactory};
 
 #[derive(Args, Default)]
 pub struct HelpArgs {
-    /// A topic: writing, evals, onboarding, hooks, commands.
+    /// A topic: writing, evals, onboarding, hooks, classifier, commands.
     pub topic: Option<String>,
     /// The full guide for coding agents: how Reviewers work and every command.
     #[arg(long)]
@@ -15,12 +15,14 @@ const WRITING: &str = include_str!("help/writing.md");
 const EVALS: &str = include_str!("help/evals.md");
 const ONBOARDING: &str = include_str!("help/onboarding.md");
 const HOOKS: &str = include_str!("help/hooks.md");
+const CLASSIFIER: &str = include_str!("help/classifier.md");
 
-const TOPICS: [(&str, &str, &str); 4] = [
+const TOPICS: [(&str, &str, &str); 5] = [
     ("writing", "How to write a Reviewer that judges well", WRITING),
     ("evals", "Cases and the tuning loop", EVALS),
     ("onboarding", "How the first run finds your rules", ONBOARDING),
     ("hooks", "What happens on a commit, and how to skip it", HOOKS),
+    ("classifier", "Skipping the Reviewers a change can't concern", CLASSIFIER),
 ];
 
 fn argument_line(argument: &clap::Arg) -> Option<String> {

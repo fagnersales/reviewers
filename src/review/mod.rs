@@ -2,7 +2,8 @@ pub mod prompt;
 pub mod terminal;
 
 use crate::claude::{self, Request};
-use crate::store::{Decision, Evidence, Project, Reviewer, Run, RunKind, Store, Usage, Verdict, new_decision_id};
+use crate::classifier::{self, Classified};
+use crate::store::{ClassifierUse, Decision, Evidence, Project, Reviewer, Run, RunKind, Store, Usage, Verdict, new_decision_id};
 use crate::util::{new_id, now_iso};
 use serde_json::{Value, json};
 use std::path::Path;
@@ -124,6 +125,7 @@ fn judge_prepared(reviewer: &Reviewer, model: Option<&str>, prepared: &Prepared,
         },
         input_hash: Some(prepared.input_hash.clone()),
         reused_from: None,
+        classifier: None,
     })
 }
 
@@ -141,13 +143,61 @@ fn reused(earlier: Decision) -> Decision {
     }
 }
 
+/// The cutoff under which the classifier clears this Reviewer; none when it may not.
+pub fn classifier_cutoff(store: &Store, reviewer: &Reviewer) -> Option<f64> {
+    match reviewer.classifier {
+        ClassifierUse::Off => None,
+        ClassifierUse::Cutoff(cutoff) => Some(cutoff),
+        ClassifierUse::Default => Some(store.setting("classifier_cutoff").ok().flatten().and_then(|text| text.parse().ok()).unwrap_or(classifier::DEFAULT_CUTOFF)),
+    }
+}
+
+pub fn percent(probability: f64) -> String {
+    format!("{:.0}%", probability * 100.0)
+}
+
+/// Approved without a session: the classifier put the chance of a broken rule under the cutoff.
+fn cleared(reviewer: &Reviewer, note: Classified) -> Decision {
+    let probability = note.probability.unwrap_or_default();
+    Decision {
+        id: new_decision_id(),
+        run_id: String::new(),
+        reviewer_id: reviewer.id.clone(),
+        reviewer_name: reviewer.name.clone(),
+        reviewer_version: reviewer.version,
+        instruction: reviewer.instruction.clone(),
+        verdict: Verdict::Approved,
+        summary: format!("Cleared by the classifier: a {} chance this change breaks the rule, under the {} cutoff.", percent(probability), percent(note.cutoff)),
+        reasoning: "No Claude session ran: the classifier judged the change unlikely to break this rule.".into(),
+        evidence: Vec::new(),
+        session: Value::Array(Vec::new()),
+        model: None,
+        duration_ms: note.duration_ms,
+        usage: Usage::default(),
+        input_hash: None,
+        reused_from: None,
+        classifier: Some(note),
+    }
+}
+
 /// Every Reviewer at once: a commit waits for the slowest one, not for all of them in a row.
 ///
 /// A Reviewer asked exactly what it was asked before gets that verdict back without running. A retry
 /// after a timeout reruns only what timed out, and committing an unchanged diff can't re-roll a block.
-pub fn judge_all(store: &Store, project: &Project, reviewers: Vec<Reviewer>, diff: &str, root: &Path, on_done: &mut dyn FnMut(&Judged)) -> Vec<Judged> {
+/// With a classifier, the Reviewers it may skip wait for one call that clears the ones the change
+/// can't concern; the others start right away.
+pub fn judge_all(
+    store: &Store,
+    project: &Project,
+    reviewers: Vec<Reviewer>,
+    diff: &str,
+    root: &Path,
+    classifier: Option<&classifier::Connection>,
+    on_done: &mut dyn FnMut(&Judged),
+) -> Vec<Judged> {
     let repository = project.remote.clone().unwrap_or_else(|| project.name.clone());
     let mut judged = Vec::with_capacity(reviewers.len());
+    let mut to_classify = Vec::new();
     let mut to_run = Vec::new();
     for reviewer in reviewers {
         let model = resolve_model(store, project, &reviewer);
@@ -158,17 +208,51 @@ pub fn judge_all(store: &Store, project: &Project, reviewers: Vec<Reviewer>, dif
                 on_done(&result);
                 judged.push(result);
             }
-            _ => to_run.push((reviewer, model, prepared)),
+            _ => match classifier.and_then(|_| classifier_cutoff(store, &reviewer)) {
+                Some(cutoff) => to_classify.push((reviewer, model, prepared, cutoff)),
+                None => to_run.push((reviewer, model, prepared, None)),
+            },
         }
     }
     let (sender, receiver) = mpsc::channel::<Judged>();
     std::thread::scope(|scope| {
-        for (reviewer, model, prepared) in to_run {
+        let start = |(reviewer, model, prepared, note): (Reviewer, Option<String>, Prepared, Option<Classified>)| {
             let sender = sender.clone();
             scope.spawn(move || {
-                let outcome = judge_prepared(&reviewer, model.as_deref(), &prepared, root);
+                let outcome = judge_prepared(&reviewer, model.as_deref(), &prepared, root).map(|decision| Decision { classifier: note, ..decision });
                 let _ = sender.send(Judged { reviewer, outcome });
             });
+        };
+        for item in to_run {
+            start(item);
+        }
+        if let (Some(connection), false) = (classifier, to_classify.is_empty()) {
+            let questions: Vec<classifier::Question> = to_classify
+                .iter()
+                .enumerate()
+                .map(|(index, (reviewer, ..))| classifier::Question { id: format!("r{index}"), name: &reviewer.name, instruction: &reviewer.instruction })
+                .collect();
+            let scores = classifier::score(connection, &repository, diff, &questions);
+            let share = scores.as_ref().map(|scores| scores.tokens / to_classify.len() as u64).unwrap_or(0);
+            for (index, (reviewer, model, prepared, cutoff)) in to_classify.into_iter().enumerate() {
+                let (probability, duration_ms, problem) = match &scores {
+                    Ok(scores) => (scores.probabilities.get(&format!("r{index}")).copied(), scores.duration_ms, None),
+                    Err(problem) => (None, 0, Some(problem.clone())),
+                };
+                let outcome = match probability {
+                    Some(probability) if probability < cutoff => classifier::Outcome::Cleared,
+                    Some(_) => classifier::Outcome::Escalated,
+                    None => classifier::Outcome::Unavailable,
+                };
+                let note = Classified { provider: connection.provider, outcome, probability, cutoff, problem, duration_ms, tokens: share };
+                if outcome == classifier::Outcome::Cleared {
+                    let result = Judged { outcome: Ok(cleared(&reviewer, note)), reviewer };
+                    on_done(&result);
+                    judged.push(result);
+                } else {
+                    start((reviewer, model, prepared, Some(note)));
+                }
+            }
         }
         drop(sender);
         for result in receiver {
@@ -259,6 +343,7 @@ mod tests {
                 context_files: Vec::new(),
                 enabled: true,
                 model: None,
+                classifier: crate::store::ClassifierUse::Default,
                 origin: json!({}),
             })
             .unwrap();
@@ -283,6 +368,7 @@ mod tests {
             usage: Usage { tokens_read: 18_000, tokens_written: 900, turns: 3, tool_calls: 2 },
             input_hash: Some(input_hash),
             reused_from: None,
+            classifier: None,
         }
     }
 
@@ -296,7 +382,7 @@ mod tests {
         assert!(store.judged_before(&project.id, &prepared.input_hash).unwrap().is_some());
 
         for attempt in 0..2 {
-            let judged = judge_all(&store, &project, vec![reviewer.clone()], DIFF, &directory, &mut |_| {});
+            let judged = judge_all(&store, &project, vec![reviewer.clone()], DIFF, &directory, None, &mut |_| {});
             let decision = judged.into_iter().next().unwrap().outcome.unwrap();
             assert_eq!(decision.verdict, Verdict::Blocked);
             // A retry of a retry still points at the run that actually judged it.
@@ -321,6 +407,56 @@ mod tests {
         assert!(store.judged_before(&project.id, &changed_rule.input_hash).unwrap().is_none());
         let other_model = prepare(&reviewer, Some("opus"), &project.name, DIFF, &directory);
         assert!(store.judged_before(&project.id, &other_model.input_hash).unwrap().is_none());
+        let _ = std::fs::remove_dir_all(&directory);
+    }
+
+    /// A one-request HTTP server that answers every question with the same probability.
+    fn classifier_answering(probability: f64) -> String {
+        use std::io::{BufRead, BufReader, Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        std::thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            let mut reader = BufReader::new(stream.try_clone().unwrap());
+            let mut length = 0;
+            loop {
+                let mut line = String::new();
+                reader.read_line(&mut line).unwrap();
+                if let Some(value) = line.to_ascii_lowercase().strip_prefix("content-length:") {
+                    length = value.trim().parse().unwrap();
+                }
+                if line == "\r\n" {
+                    break;
+                }
+            }
+            let mut body = vec![0; length];
+            reader.read_exact(&mut body).unwrap();
+            let request: Value = serde_json::from_slice(&body).unwrap();
+            let answers: serde_json::Map<String, Value> = request["questions"].as_object().unwrap().keys().map(|id| (id.clone(), json!({ "type": "boolean", "probability": probability }))).collect();
+            let reply = json!({ "answers": answers, "usage": { "inputTokens": 1200, "outputTokens": 3 } }).to_string();
+            let mut stream = stream;
+            write!(stream, "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{reply}", reply.len()).unwrap();
+        });
+        format!("http://{address}/")
+    }
+
+    #[test]
+    fn the_classifier_clears_a_reviewer_without_starting_a_session() {
+        let (store, project, reviewer, directory) = fixture();
+        let connection = classifier::Connection::new(classifier::Provider::Gateway, "test-key".into(), Some(classifier_answering(0.04)));
+        let started = Instant::now();
+        let judged = judge_all(&store, &project, vec![reviewer.clone()], DIFF, &directory, Some(&connection), &mut |_| {});
+        let decision = judged.into_iter().next().unwrap().outcome.unwrap();
+        assert_eq!(decision.verdict, Verdict::Approved);
+        let note = decision.classifier.expect("the classifier's note");
+        assert_eq!((note.outcome, note.probability, note.cutoff), (classifier::Outcome::Cleared, Some(0.04), classifier::DEFAULT_CUTOFF));
+        assert_eq!(note.tokens, 1203);
+        // No Claude session: no tokens of its own, and far quicker than one.
+        assert_eq!(decision.usage.tokens_read + decision.usage.turns as u64, 0);
+        assert!(started.elapsed() < Duration::from_secs(5));
+        // A Reviewer turned off for the classifier never asks it.
+        let off = Reviewer { classifier: ClassifierUse::Off, ..reviewer };
+        assert_eq!(classifier_cutoff(&store, &off), None);
         let _ = std::fs::remove_dir_all(&directory);
     }
 }

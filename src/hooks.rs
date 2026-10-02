@@ -161,17 +161,24 @@ pub fn commit_msg(message_file: Option<&str>) -> i32 {
     eprintln!("reviewers: checking {} at once…", crate::util::plural(reviewers.len(), "Reviewer"));
     let started_at = crate::util::now_iso();
     let started = Instant::now();
-    let judged = review::judge_all(&store, &project, reviewers, &diff, &root, &mut |judged| match &judged.outcome {
+    let classifier = crate::classifier::connected();
+    let judged = review::judge_all(&store, &project, reviewers, &diff, &root, classifier.as_ref(), &mut |judged| match &judged.outcome {
         Ok(decision) => {
             let mark = if decision.verdict == crate::store::Verdict::Approved { paint.green("✓") } else { paint.red("✗") };
-            let timing = match &decision.reused_from {
-                Some(run) => format!("unchanged since {run}"),
-                None => crate::util::duration(decision.duration_ms),
+            let cleared = decision.classifier.as_ref().filter(|note| note.outcome == crate::classifier::Outcome::Cleared);
+            let timing = match (&decision.reused_from, cleared) {
+                (Some(run), _) => format!("unchanged since {run}"),
+                (None, Some(note)) => format!("cleared by the classifier · {}", review::percent(note.probability.unwrap_or_default())),
+                (None, None) => crate::util::duration(decision.duration_ms),
             };
             eprintln!("  {mark} {} {}", judged.reviewer.name, paint.dim(&timing));
         }
         Err(_) => eprintln!("  {} {} {}", paint.yellow("!"), judged.reviewer.name, paint.dim("no verdict")),
     });
+    let unavailable = judged.iter().filter_map(|judged| judged.outcome.as_ref().ok()?.classifier.as_ref()?.problem.clone()).next();
+    if let Some(problem) = unavailable {
+        eprintln!("{}", paint.dim(&format!("reviewers: the classifier couldn't answer ({problem}), so those Reviewers ran in full")));
+    }
     match review::record(&mut store, &project, RunKind::Review, judged, &diff, attempted, started_at, started) {
         Ok(reviewed) => {
             eprintln!("{}", review::terminal::report(&reviewed.run, &paint));

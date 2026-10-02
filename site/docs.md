@@ -26,9 +26,13 @@ A commit that ends "could not reach a verdict" means a Reviewer crashed or timed
 
 `reviewers stats --json` (this repo) or `--all`: commits judged, blocks, wait, tokens, and per Reviewer: block rate, time, tokens per catch, and `neverBlocks` for one that hasn't blocked in 50+ runs. A Reviewer that never blocks is a candidate for a lint rule or for turning off. Draw a chart when it helps; the data is all in the JSON.
 
+## The classifier
+
+When one is connected (`reviewers classifier status --json`), it clears the Reviewers a change can't concern before any session starts. After connecting it, run `reviewers classifier check --json`: for any Reviewer with `missedBlocks`, set a cutoff under its `lowestBlockScore` (`reviewers edit <name> --classifier 0.1`) or turn it off for that Reviewer (`--classifier off`). `reviewers help classifier` has the rest.
+
 ## Data
 
-Everything lives in `~/.reviewers/reviewers.sqlite` on this machine. Nothing is sent anywhere except to the model, through the person's own Claude Code.
+Everything lives in `~/.reviewers/reviewers.sqlite` on this machine. Diffs go to the model through the person's own Claude Code, and, when a classifier is connected, to its provider.
 
 ## Commands
 
@@ -79,6 +83,7 @@ Create a Reviewer
   --paths <PATHS>: Only run when the diff touches these globs, comma-separated: `convex/**,shared/**`
   --context-files <CONTEXT_FILES>: Repo files attached to every review as reference, comma-separated
   --model <MODEL>: Model for this Reviewer only
+  --classifier <CLASSIFIER>: When the classifier may skip it: `default`, `off`, or a cutoff from 0 to 1
   --disabled: Create it turned off
 
 ### `reviewers edit`
@@ -97,6 +102,7 @@ Change a Reviewer. A new instruction is a new version
   --remove-repo <REMOVE_REPO>: Unlink a repo (path)
   --advisory: Report without stopping the commit
   --blocking: Stop the commit when it blocks (the default)
+  --classifier <CLASSIFIER>: When the classifier may skip it: `default`, `off`, or a cutoff from 0 to 1
 
 ### `reviewers enable`
 
@@ -236,6 +242,36 @@ Bring over Reviewers, history and evals from Personal Workspace
   --from <FROM>: Personal Workspace's database. Defaults to ~/apps/personalworkspace/.data/workspace.sqlite
   --hooks: Also switch every imported repo's git hooks from Personal Workspace to reviewers
 
+### `reviewers classifier status`
+
+What's connected, the cutoffs, and what it cleared lately
+
+  --json
+
+### `reviewers classifier connect`
+
+Connect Jev with a key, read from a hidden prompt or from stdin. One small call checks it first
+
+  <PROVIDER> (required)
+  --endpoint <ENDPOINT>: A SystemOne-compatible URL of your own, instead of the provider's
+
+### `reviewers classifier disconnect`
+
+Forget the key. Every Reviewer runs in full again
+
+### `reviewers classifier cutoff`
+
+Show or set the default cutoff, from 0 to 1. Under it, the classifier clears a Reviewer
+
+  <VALUE>
+
+### `reviewers classifier check`
+
+Replay recent commits through the classifier: what it would have cleared, and any block it would have missed
+
+  --runs <RUNS>: How many recent commits
+  --json
+
 ### `reviewers skill install`
 
 Find the coding agents on this machine and give each the skill
@@ -262,7 +298,7 @@ Update reviewers to the latest release
 
 What you can do. Agents: `reviewers help --agent`
 
-  <TOPIC>: A topic: writing, evals, onboarding, hooks, commands
+  <TOPIC>: A topic: writing, evals, onboarding, hooks, classifier, commands
   --agent: The full guide for coding agents: how Reviewers work and every command
 
 
@@ -272,6 +308,7 @@ What you can do. Agents: `reviewers help --agent`
 - `reviewers help evals`: Cases and the tuning loop
 - `reviewers help onboarding`: How the first run finds your rules
 - `reviewers help hooks`: What happens on a commit, and how to skip it
+- `reviewers help classifier`: Skipping the Reviewers a change can't concern
 
 ---
 
@@ -360,3 +397,30 @@ reviewers hook commit-msg "$1"
 Skip the hooks once with `REVIEWERS_BYPASS=1 git commit …`. Agents shouldn't, unless the person asks.
 
 Every review is kept: `reviewers runs`, `reviewers run <id>`, `reviewers stats`.
+
+---
+
+# The classifier
+
+A cheap first pass before the Claude sessions. On each commit, one call to Jev, an evaluation model, asks about every Reviewer at once: does this change break the rule? Jev answers each with a probability. A Reviewer scored under its cutoff is approved without a session (cleared); the others run as usual.
+
+The classifier never blocks a commit: a high score only means the Reviewer runs. When it can't answer (an error, a timeout, a file too large to read whole), every Reviewer runs in full.
+
+## Connect
+
+Jev is reachable two ways:
+
+- `reviewers classifier connect gateway`, with a Vercel AI Gateway key.
+- `reviewers classifier connect jev`, with a TypeSafe key.
+
+The key comes from a hidden prompt, or from stdin: `printf %s "$KEY" | reviewers classifier connect gateway`. One small call checks it before it's saved in `~/.reviewers/classifier.json`, readable by the owner only. `reviewers classifier disconnect` forgets it. While connected, each commit's diff and the Reviewers' rules go to that provider.
+
+## Cutoffs
+
+The default cutoff is 25%: a Reviewer is cleared when Jev puts the chance of a broken rule under 25%. Change it with `reviewers classifier cutoff 0.2`. One Reviewer can have its own, `reviewers edit <name> --classifier 0.15`, or never be cleared, `--classifier off`. Use `off` for a rule the diff alone can't settle, one that depends on files the change doesn't show.
+
+## Measure it
+
+`reviewers classifier check` replays recent commits through the classifier and compares it with what the Reviewers decided: how many sessions it would have skipped, the tokens that saves, and any block it would have let through. "safe under" is the highest cutoff that misses none of a Reviewer's past blocks. A Reviewer with missed blocks needs a cutoff below that, or `--classifier off`.
+
+Every cleared decision keeps its score: `reviewers run <id>` shows it, and `reviewers classifier` counts them.
