@@ -39,6 +39,7 @@ pub fn decision_schema() -> Value {
             "reasoning": { "type": "string", "minLength": 1 },
             "evidence": {
                 "type": "array",
+                "description": "Required when the verdict is blocked: one entry per violation, quoting the changed lines.",
                 "items": {
                     "type": "object",
                     "properties": {
@@ -75,6 +76,7 @@ pub fn review_prompt(input: &PromptInput) -> String {
         String::new(),
         "Evidence must quote changed lines from the diff: lines added, or lines removed. What you read elsewhere in the repository informs the reasoning but is not evidence by itself.".into(),
         "If you block, cite exact files and lines from the diff, and say in each explanation what the code should do instead: the agent that wrote it reads your answer and fixes the code from it.".into(),
+        "Block only when the diff clearly breaks the instruction. If the code can fairly be read either way, or you can't establish the violation from the diff and the repository, approve, and say in the reasoning what you could not establish.".into(),
         String::new(),
         "Trigger: commit".into(),
         format!("Repository: {}", input.repository),
