@@ -24,6 +24,8 @@
 </header>
 
 <main class="rail" data-rail>
+  <div class="opening">
+  <div class="opening-steps">
   <section class="step hero" data-step>
     <span class="marker" aria-hidden="true"></span>
     <div class="body">
@@ -43,15 +45,12 @@
       <p class="dim">I built this because I'm not sure a lint rule is enough for a given situation, so a generic approach (using agents) is much easier for me. If you're comfortable with lint rules, you're better off not using Reviewers at all.</p>
     </div>
   </section>
+  </div>
 
-  <section class="step" data-step>
-    <span class="marker" aria-hidden="true"></span>
-    <div class="body">
-      <h2>A commit, judged</h2>
-      <p class="dim">Every Reviewer that applies runs at once, each as its own read-only Claude Code session. When one blocks, the agent gets the file, the lines and the fix.</p>
-      <div class="session" data-session aria-label="A replay of a real run: three Reviewers block a commit, then pass its fix"></div>
-    </div>
-  </section>
+  <aside class="demo">
+    <div class="terminal"><div class="session" data-session aria-label="A replay of a real run: three Reviewers block a commit, then pass its fix"></div></div>
+  </aside>
+  </div>
 
   <section class="step" data-step>
     <span class="marker" aria-hidden="true"></span>

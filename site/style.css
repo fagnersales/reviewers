@@ -41,7 +41,8 @@ code { font: inherit; }
 .masthead nav a:hover, .colophon nav a:hover, nav a[aria-current] { color: var(--text); }
 
 /* The rail: one line down the page, a step marker per section, like the CLI's gutter. */
-.rail { position: relative; padding-top: 8px; }
+.rail { position: relative; max-width: none; padding-top: 8px; }
+.rail > .step, .opening-steps > .step { max-width: 896px; }
 .step { position: relative; display: grid; grid-template-columns: var(--gutter) minmax(0, 1fr); padding-bottom: 72px; }
 .step::before { content: ""; position: absolute; left: 6px; top: 0; bottom: 0; border-left: 1px solid var(--rail); }
 .step.last::before { bottom: auto; height: 12px; }
@@ -65,10 +66,21 @@ h2 { font-size: 15px; line-height: 1.7; margin-bottom: 8px; }
 .install button { font: inherit; font-size: 13px; color: var(--bg); background: var(--text); border: 0; border-radius: 5px; padding: 4px 10px; cursor: pointer; }
 .install button:hover { background: #fff; }
 
+/* The replay sits on the rail under the opening steps, and beside them when there's room. */
+.demo { position: relative; max-width: 896px; padding: 0 0 72px calc(var(--gutter) + 8px); }
+.demo::before { content: ""; position: absolute; left: 6px; top: 0; bottom: 0; border-left: 1px solid var(--rail); }
+.demo .terminal { margin: 0; }
+@media (min-width: 1280px) {
+  .opening { display: grid; grid-template-columns: 600px minmax(0, 760px); column-gap: 56px; align-items: start; }
+  .demo { padding: 48px 0 0; }
+  .demo::before { display: none; }
+}
+
 /* The replay: a fixed-height terminal viewport, so the page never jumps while it plays. */
+.terminal { margin: 8px 0 14px; padding: 0 18px; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; }
+/* Lines fade as they scroll off the top; the fade is on the screen inside, so the box keeps its border. */
 .session {
-  height: 470px; overflow: hidden; margin: 8px 0 14px; padding: 16px 18px;
-  background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+  height: 470px; overflow: hidden; padding: 16px 0;
   font-size: 13.5px; line-height: 1.6;
   -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 14px);
   mask-image: linear-gradient(to bottom, transparent 0, #000 14px);
@@ -117,7 +129,8 @@ s.tip { color: var(--dim); text-decoration-color: var(--dim); }
   .hero { padding-top: 28px; }
   .install { display: flex; align-items: flex-start; }
   .install code { white-space: normal; }
-  .session { height: 430px; padding: 12px; font-size: 12px; }
+  .terminal { padding: 0 12px; }
+  .session { height: 430px; padding: 12px 0; font-size: 12px; }
   .pairs li { grid-template-columns: 1fr; gap: 4px; }
   .pairs .to { display: none; }
   .help div { grid-template-columns: 1fr; gap: 2px; }
