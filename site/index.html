@@ -24,8 +24,6 @@
 </header>
 
 <main class="rail" data-rail>
-  <div class="opening">
-  <div class="opening-steps">
   <section class="step hero" data-step>
     <span class="marker" aria-hidden="true"></span>
     <div class="body">
@@ -45,15 +43,12 @@
       <p class="dim">I built this because I'm not sure a lint rule is enough for a given situation, so a generic approach (using agents) is much easier for me. If you're comfortable with lint rules, you're better off not using Reviewers at all.</p>
     </div>
   </section>
-  </div>
-
   <aside class="demo">
     <div class="terminal">
       <div class="titlebar" aria-hidden="true"><span class="lights"><i></i><i></i><i></i></span><span class="title">acme-store · zsh</span></div>
       <div class="session" data-session aria-label="A replay of a real run: three Reviewers block a commit, then pass its fix"></div>
     </div>
   </aside>
-  </div>
 
   <section class="step" data-step>
     <span class="marker" aria-hidden="true"></span>
@@ -169,12 +164,18 @@
   const wait = (ms) => (reduced ? Promise.resolve() : new Promise((resolve) => setTimeout(resolve, ms)));
   const escape = (text) => text.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]);
 
+  // Like a terminal: new lines keep it at the bottom, unless the reader scrolled up to read.
+  let following = true;
+  session.addEventListener("scroll", () => {
+    following = session.scrollHeight - session.scrollTop - session.clientHeight < 24;
+  }, { passive: true });
+
   function line(html = "", className = "") {
     const element = document.createElement("div");
     element.className = `line ${className}`.trim();
     element.innerHTML = html || "&nbsp;";
     session.append(element);
-    session.scrollTop = session.scrollHeight;
+    if (following) session.scrollTop = session.scrollHeight;
     return element;
   }
 
@@ -237,9 +238,38 @@
       const end = line(`${PROMPT}<span class="cursor"></span>`);
       if (reduced) return;
       await wait(5000);
+      // Don't wipe what someone is reading: start over once they're back at the bottom.
+      while (!following) await wait(500);
       end.remove();
     }
   }
+  // Beside the opening, the terminal sits in full view. When wider content scrolls up beside it,
+  // it slides right until it clears that content, and the page edge cuts it off.
+  const demo = document.querySelector(".demo");
+  const terminal = demo.querySelector(".terminal");
+  const wide = [...document.querySelectorAll(".pairs, .help")];
+  const sideBySide = matchMedia("(min-width: 1280px)");
+  const GAP = 40;
+  let queued = false;
+  function tuck() {
+    queued = false;
+    if (!sideBySide.matches) return terminal.classList.remove("tucked");
+    const band = terminal.getBoundingClientRect();
+    const passing = wide.filter((element) => {
+      const box = element.getBoundingClientRect();
+      return box.bottom > band.top && box.top < band.bottom;
+    });
+    const contentRight = Math.max(0, ...passing.map((element) => element.getBoundingClientRect().right));
+    terminal.style.setProperty("--tuck", `${Math.max(0, contentRight + GAP - demo.getBoundingClientRect().left)}px`);
+    terminal.classList.toggle("tucked", passing.length > 0);
+  }
+  const queueTuck = () => {
+    if (!queued) (queued = true), requestAnimationFrame(tuck);
+  };
+  addEventListener("scroll", queueTuck, { passive: true });
+  addEventListener("resize", queueTuck);
+  tuck();
+
   // Start when the replay scrolls into view, so it's seen from the first keystroke.
   new IntersectionObserver((entries, observer) => {
     if (entries.some((entry) => entry.isIntersecting)) {

@@ -42,7 +42,7 @@ code { font: inherit; }
 
 /* The rail: one line down the page, a step marker per section, like the CLI's gutter. */
 .rail { position: relative; max-width: none; padding-top: 8px; }
-.rail > .step, .opening-steps > .step { max-width: 896px; }
+.rail > .step { max-width: 896px; }
 .step { position: relative; display: grid; grid-template-columns: var(--gutter) minmax(0, 1fr); padding-bottom: 72px; }
 .step::before { content: ""; position: absolute; left: 6px; top: 0; bottom: 0; border-left: 1px solid var(--rail); }
 .step.last::before { bottom: auto; height: 12px; }
@@ -66,14 +66,19 @@ h2 { font-size: 15px; line-height: 1.7; margin-bottom: 8px; }
 .install button { font: inherit; font-size: 13px; color: var(--bg); background: var(--text); border: 0; border-radius: 5px; padding: 4px 10px; cursor: pointer; }
 .install button:hover { background: #fff; }
 
-/* The replay sits on the rail under the opening steps, and beside them when there's room. */
+/* The replay sits on the rail under the opening steps. When there's room, it sits beside them and
+   stays in view while the page scrolls; when wider content passes, it slides into the right edge. */
 .demo { position: relative; max-width: 896px; padding: 0 0 72px calc(var(--gutter) + 8px); }
 .demo::before { content: ""; position: absolute; left: 6px; top: 0; bottom: 0; border-left: 1px solid var(--rail); }
 .demo .terminal { margin: 0; }
 @media (min-width: 1280px) {
-  .opening { display: grid; grid-template-columns: 600px minmax(0, 760px); column-gap: 56px; align-items: start; }
-  .demo { padding: 48px 0 0; }
+  /* Clips the terminal where it slides past the edge, without a horizontal scrollbar. */
+  .rail { overflow-x: clip; }
+  .demo { position: absolute; top: 0; bottom: 0; left: calc(32px + 680px + 56px); right: 32px; max-width: 760px; padding: 56px 0 0; pointer-events: none; }
   .demo::before { display: none; }
+  .demo .terminal { position: sticky; top: 24px; pointer-events: auto; transition: transform .6s cubic-bezier(.2, .7, .2, 1); }
+  .demo .terminal.tucked { transform: translateX(var(--tuck, 0px)); }
+  .demo .session { height: min(470px, calc(100vh - 106px)); }
 }
 
 /* The replay: a fixed-height terminal viewport, so the page never jumps while it plays. */
@@ -92,7 +97,8 @@ h2 { font-size: 15px; line-height: 1.7; margin-bottom: 8px; }
 .prompt .caret { color: var(--text); }
 /* Lines fade as they scroll off the top; the fade is on the screen inside, so the box keeps its border. */
 .session {
-  height: 470px; overflow: hidden; padding: 14px 18px 16px;
+  height: 470px; overflow-y: auto; padding: 14px 18px 16px;
+  scrollbar-width: thin; scrollbar-color: #333 transparent;
   font-size: 13.5px; line-height: 1.6;
   -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 14px);
   mask-image: linear-gradient(to bottom, transparent 0, #000 14px);
