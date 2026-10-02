@@ -387,7 +387,17 @@ fn judge_case(store: &Mutex<Store>, reviewer: &Reviewer, model: Option<&str>, re
     })();
     let duration_ms = started.elapsed().as_millis() as u64;
     match outcome {
-        Ok((None, _)) => CaseResult { pass: case.expected == Verdict::Approved, actual: "skipped".into(), case, decision: None, error: None, duration_ms, run_id: None },
+        // A case the Reviewer never read proves nothing, even one that expects approval: otherwise
+        // narrowing `--paths` would turn every approved case green without judging it.
+        Ok((None, _)) => CaseResult {
+            pass: false,
+            actual: "not run".into(),
+            error: Some("the case's files are outside this Reviewer's --paths, so it never judged it".into()),
+            case,
+            decision: None,
+            duration_ms,
+            run_id: None,
+        },
         Ok((Some(decision), diff_text)) => {
             let mut run_id = None;
             if let Some(project_id) = record_project {
@@ -566,4 +576,47 @@ pub fn history(handle: &str, limit: u32, delete: Option<&str>, json_output: bool
         );
     }
     Ok(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_case_outside_the_paths_fails_without_running() {
+        let directory = temp_path("test");
+        std::fs::create_dir_all(&directory).unwrap();
+        let store = Store::open(&directory.join("reviewers.sqlite")).unwrap();
+        let reviewer = store
+            .create_reviewer(crate::store::NewReviewer {
+                name: "No type casts".into(),
+                instruction: "Block `as` casts.".into(),
+                scope: crate::store::Scope::Everywhere,
+                project_ids: Vec::new(),
+                paths: vec!["src/**".into()],
+                context_files: Vec::new(),
+                enabled: true,
+                model: None,
+                origin: json!({}),
+            })
+            .unwrap();
+        let readme = "diff --git a/README.md b/README.md\nnew file mode 100644\n--- /dev/null\n+++ b/README.md\n@@ -0,0 +1 @@\n+hello\n";
+        let case = Case {
+            id: new_id("case"),
+            reviewer_id: reviewer.id.clone(),
+            name: "docs only".into(),
+            expected: Verdict::Approved,
+            diff: readme.into(),
+            diff_hash: diff::hash(readme),
+            files: Vec::new(),
+            origin: json!({}),
+            reviewer_version: reviewer.version,
+            created_at: now_iso(),
+        };
+        let result = judge_case(&Mutex::new(store), &reviewer, None, None, case);
+        assert!(!result.pass, "an approval nobody gave must not pass");
+        assert_eq!(result.actual, "not run");
+        assert!(result.decision.is_none());
+        let _ = std::fs::remove_dir_all(&directory);
+    }
 }
