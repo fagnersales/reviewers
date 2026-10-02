@@ -59,8 +59,6 @@ pub fn run(args: ImportArgs) -> Outcome {
                 let path_scope: Option<String> = row.get("path_scope")?;
                 let screen: Option<Value> = row.get::<_, Option<String>>("screen_json")?.and_then(|text| serde_json::from_str(&text).ok());
                 let harness: Option<String> = row.get("harness_id")?;
-                // A screen that scored with Jev keeps its cutoff as the classifier's.
-                let classifier = screen.as_ref().and_then(|screen| screen["judge"]["cutoff"].as_f64()).map(ClassifierUse::Cutoff).unwrap_or(ClassifierUse::Default);
                 Ok(Reviewer {
                     id: row.get("id")?,
                     slug: String::new(),
@@ -74,7 +72,8 @@ pub fn run(args: ImportArgs) -> Outcome {
                     blocking: row.get::<_, i64>("blocking")? != 0,
                     model: if harness.as_deref() == Some("claude-code") { row.get("model_id")? } else { None },
                     version: row.get("version")?,
-                    classifier,
+                    // A screen's cutoff scored single lines it extracted, not a whole change, so it doesn't carry over.
+                    classifier: ClassifierUse::Default,
                     origin: json!({
                         "kind": "import",
                         "from": "personal-workspace",

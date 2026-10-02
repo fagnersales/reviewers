@@ -163,6 +163,8 @@ struct Tally {
     tokens_saved: u64,
     lowest_block: Option<f64>,
     cutoff: Option<f64>,
+    /// Each judged decision as `[score, blocked, tokens]`, so any cutoff can be tried on the JSON.
+    scores: Vec<(f64, bool, u64)>,
 }
 
 /// A decision a Claude session actually reached: the classifier is measured against those only.
@@ -217,6 +219,7 @@ fn check(limit: u32, json_output: bool) -> Outcome {
             });
             tally.judged += 1;
             let blocked = decision.verdict == Verdict::Blocked;
+            tally.scores.push((*probability, blocked, decision.usage.tokens_read + decision.usage.tokens_written));
             let would_clear = tally.cutoff.is_some_and(|cutoff| *probability < cutoff);
             if blocked {
                 tally.blocked += 1;
@@ -246,6 +249,7 @@ fn check(limit: u32, json_output: bool) -> Outcome {
             "reviewers": rows.iter().map(|tally| json!({
                 "name": tally.name, "judged": tally.judged, "blocked": tally.blocked, "cleared": tally.cleared,
                 "missedBlocks": tally.missed, "tokensSaved": tally.tokens_saved, "cutoff": tally.cutoff, "lowestBlockScore": tally.lowest_block,
+                "scores": tally.scores,
             })).collect::<Vec<_>>(),
         }));
     }
@@ -275,7 +279,7 @@ fn check(limit: u32, json_output: bool) -> Outcome {
     }
     println!(
         "{}",
-        ui::dim("\"safe under\" is the highest cutoff that misses none of that Reviewer's past blocks. Set one with `reviewers edit <name> --classifier 0.15`, or `--classifier off`.")
+        ui::dim("\"safe under\" is the highest cutoff that misses none of that Reviewer's past blocks. Set one with `reviewers edit <name> --classifier 0.1`, or `--classifier off`.")
     );
     Ok(0)
 }

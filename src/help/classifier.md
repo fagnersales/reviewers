@@ -15,7 +15,7 @@ The key comes from a hidden prompt, or from stdin: `printf %s "$KEY" | reviewers
 
 ## Cutoffs
 
-The default cutoff is 25%: a Reviewer is cleared when Jev puts the chance of a broken rule under 25%. Change it with `reviewers classifier cutoff 0.2`. One Reviewer can have its own, `reviewers edit <name> --classifier 0.15`, or never be cleared, `--classifier off`. Use `off` for a rule the diff alone can't settle, one that depends on files the change doesn't show.
+The default cutoff is 15%: a Reviewer is cleared when Jev puts the chance of a broken rule under 15%. Replayed over 183 real commits, that skipped about half the sessions and missed none of 30 blocks; 25% missed 3. Change it with `reviewers classifier cutoff 0.2`. One Reviewer can have its own, `reviewers edit <name> --classifier 0.1`, or never be cleared, `--classifier off`. Use `off` for a rule the diff alone can't settle, one that depends on files the change doesn't show.
 
 ## Measure it
 
