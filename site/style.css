@@ -32,8 +32,8 @@ code { font: inherit; }
 .cyan { color: var(--text); text-decoration: underline; text-decoration-color: var(--faint); text-underline-offset: 3px; }
 .magenta { color: var(--dim); }
 
-.masthead, .rail, .colophon { max-width: 960px; margin: 0 auto; padding-left: 32px; padding-right: 32px; }
-.masthead { display: flex; justify-content: space-between; align-items: center; padding-top: 28px; padding-bottom: 8px; }
+.masthead, .rail, .colophon { max-width: 960px; margin: 0; padding-left: 32px; padding-right: 32px; }
+.masthead { max-width: none; display: flex; justify-content: space-between; align-items: center; padding-top: 28px; padding-bottom: 8px; }
 .wordmark { display: block; color: var(--text); line-height: 0; }
 .wordmark svg { height: 24px; width: auto; }
 .masthead nav, .colophon nav { display: flex; gap: 24px; }
@@ -124,7 +124,7 @@ s.tip { color: var(--dim); text-decoration-color: var(--dim); }
 @media (prefers-reduced-motion: reduce) { .cursor { animation: none; } html { scroll-behavior: auto; } }
 
 /* Docs: the guide, set in the same terminal type. */
-.doc { max-width: 960px; margin: 0 auto; padding: 32px 32px 96px 60px; }
+.doc { max-width: 960px; margin: 0; padding: 32px 32px 96px 60px; }
 .doc > * { max-width: 760px; }
 .doc h1 { font-size: 30px; line-height: 1.2; letter-spacing: -.01em; max-width: none; margin: 0 0 20px; }
 .doc h2 { font-size: 18px; margin: 48px 0 10px; }
