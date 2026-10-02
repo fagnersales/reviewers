@@ -489,7 +489,13 @@ impl Store {
             return Ok(found.clone());
         }
         let slug = slugify(wanted);
-        let matches: Vec<&Reviewer> = all.iter().filter(|reviewer| !slug.is_empty() && reviewer.slug.starts_with(&slug)).collect();
+        let prefixed: Vec<&Reviewer> = all.iter().filter(|reviewer| !slug.is_empty() && reviewer.slug.starts_with(&slug)).collect();
+        // Then any unique part of the name: `punctuation` finds "Don't mark punctuation as errors".
+        let matches = if prefixed.is_empty() {
+            all.iter().filter(|reviewer| !slug.is_empty() && reviewer.slug.contains(&slug)).collect()
+        } else {
+            prefixed
+        };
         match matches.as_slice() {
             [only] => Ok((*only).clone()),
             [] => Err(format!("no Reviewer matches \"{wanted}\"; `reviewers list --all` shows them")),
