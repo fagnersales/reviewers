@@ -54,12 +54,11 @@ code { font: inherit; }
 .body { min-width: 0; padding-left: 8px; }
 
 h1, h2 { margin: 0; font-weight: 700; }
-h1 { font-size: clamp(30px, 5.2vw, 52px); line-height: 1.12; letter-spacing: -.02em; max-width: 20ch; margin: -6px 0 22px; }
 h2 { font-size: 15px; line-height: 1.7; margin-bottom: 8px; }
 .body > p { max-width: 62ch; margin: 0 0 18px; }
 .body > p.small { max-width: 90ch; }
 .hero { padding-top: 48px; padding-bottom: 88px; }
-.hero h1 + .dim { font-size: 16px; }
+.hero .lede { font-size: 16px; }
 
 .install { display: inline-flex; align-items: center; gap: 16px; max-width: 100%; margin: 6px 0 14px; padding: 12px 12px 12px 16px; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; }
 .install code { white-space: nowrap; }
