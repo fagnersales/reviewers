@@ -47,22 +47,22 @@ Read your agent sessions and turn the rules you keep repeating into Reviewers
   --model <MODEL>: The model the agents run on (skips the model picker)
   --parallel <PARALLEL>: Agents running at once
   --max <MAX>: At most this many Reviewers
-  --yes: Take the defaults without asking: every repo, your usual model, the strongest Reviewers on, hooks installed
-  --dry-run: Build the material and stop before any agent runs
-  --no-skill: Don't give your coding agents the reviewers skill
+  --yes: Take the defaults without asking: every repo, your usual model, the strongest Reviewers on, hooks installed; one of `true`, `false`
+  --dry-run: Build the material and stop before any agent runs; one of `true`, `false`
+  --no-skill: Don't give your coding agents the reviewers skill; one of `true`, `false`
 
 ### `reviewers status`
 
 This repo: the Reviewers that judge it and its latest reviews
 
-  --json: Print JSON instead of text, for agents and scripts
+  --json: Print JSON instead of text, for agents and scripts; one of `true`, `false`
 
 ### `reviewers list`
 
 List Reviewers: this repo's, or every one with --all
 
-  --all: Every Reviewer, not just the ones judging this repo
-  --json: Print JSON instead of text, for agents and scripts
+  --all: Every Reviewer, not just the ones judging this repo; one of `true`, `false`
+  --json: Print JSON instead of text, for agents and scripts; one of `true`, `false`
 
 ### `reviewers show`
 
@@ -70,7 +70,7 @@ One Reviewer: its instruction, where it runs, and its record
 
   <REVIEWER> (required): Name, slug or id
   --decisions <DECISIONS>: How many recent decisions to list
-  --json: Print JSON instead of text, for agents and scripts
+  --json: Print JSON instead of text, for agents and scripts; one of `true`, `false`
 
 ### `reviewers new`
 
@@ -78,13 +78,13 @@ Create a Reviewer
 
   --name <NAME> (required): Short name, stated as the rule: "No type casts"
   --instruction <INSTRUCTION> (required): The rule, as a brief for the judge: what to block, what's allowed, real examples
-  --everywhere: Judge every repo instead of just this one
+  --everywhere: Judge every repo instead of just this one; one of `true`, `false`
   --repo <REPOS>: Repos to judge (paths). Defaults to the repo you're in
   --paths <PATHS>: Only run when the diff touches these globs, comma-separated: `convex/**,shared/**`
   --context-files <CONTEXT_FILES>: Repo files attached to every review as reference, comma-separated
   --model <MODEL>: Model for this Reviewer only
   --classifier <CLASSIFIER>: When the classifier may skip it: `default`, `off`, or a cutoff from 0 to 1
-  --disabled: Create it turned off
+  --disabled: Create it turned off; one of `true`, `false`
 
 ### `reviewers edit`
 
@@ -96,12 +96,12 @@ Change a Reviewer. A new instruction is a new version
   --paths <PATHS>: Comma-separated globs, or `none`
   --context-files <CONTEXT_FILES>: Comma-separated files, or `none`
   --model <MODEL>: A model id, or `default` to inherit
-  --everywhere: Judge every repo
-  --repos-only: Judge only linked repos
+  --everywhere: Judge every repo; one of `true`, `false`
+  --repos-only: Judge only linked repos; one of `true`, `false`
   --add-repo <ADD_REPO>: Link a repo (path)
   --remove-repo <REMOVE_REPO>: Unlink a repo (path)
-  --advisory: Report without stopping the commit
-  --blocking: Stop the commit when it blocks (the default)
+  --advisory: Report without stopping the commit; one of `true`, `false`
+  --blocking: Stop the commit when it blocks (the default); one of `true`, `false`
   --classifier <CLASSIFIER>: When the classifier may skip it: `default`, `off`, or a cutoff from 0 to 1
 
 ### `reviewers enable`
@@ -126,28 +126,28 @@ Delete a Reviewer and its eval cases. Past decisions stay in the history
 
 Recent commit reviews: this repo's, or every repo's with --all
 
-  --all
-  --evals: Include eval runs
+  --all: one of `true`, `false`
+  --evals: Include eval runs; one of `true`, `false`
   --limit <LIMIT>
-  --prune-evals: Delete every eval run kept by `reviewers eval --record`. Commit reviews are never deleted in bulk
-  --json: Print JSON instead of text, for agents and scripts
+  --prune-evals: Delete every eval run kept by `reviewers eval --record`. Commit reviews are never deleted in bulk; one of `true`, `false`
+  --json: Print JSON instead of text, for agents and scripts; one of `true`, `false`
 
 ### `reviewers run`
 
 One review in full: every verdict, its evidence and reasoning
 
   <ID> (required)
-  --session: Also print each Reviewer's whole session: files read, thinking, tools
-  --delete: Delete this run from the history
-  --json: Print JSON instead of text, for agents and scripts
+  --session: Also print each Reviewer's whole session: files read, thinking, tools; one of `true`, `false`
+  --delete: Delete this run from the history; one of `true`, `false`
+  --json: Print JSON instead of text, for agents and scripts; one of `true`, `false`
 
 ### `reviewers stats`
 
 What each Reviewer catches, how long it adds to a commit, and the tokens it uses
 
-  --all: Every repo, not just this one
+  --all: Every repo, not just this one; one of `true`, `false`
   --days <DAYS>: Only the last N days
-  --json: Print JSON instead of text, for agents and scripts
+  --json: Print JSON instead of text, for agents and scripts; one of `true`, `false`
 
 ### `reviewers case add`
 
@@ -155,20 +155,20 @@ Capture a diff as a case: the working tree by default, or --staged, --from-run, 
 
   <REVIEWER> (required): Name, slug or id of the Reviewer
   --name <NAME> (required): Kebab-case, describing the situation: `refactor-moves-guard`
-  --expect <EXPECT> (required)
-  --staged: Only what's staged, not the whole working tree
+  --expect <EXPECT> (required): one of `approved`, `blocked`
+  --staged: Only what's staged, not the whole working tree; one of `true`, `false`
   --from-run <FROM_RUN>: The diff a past review judged
   --patch <PATCH>: A patch file
   --repo <REPO>: The repo the diff belongs to. Defaults to the current directory
   --include <INCLUDE>: Extra globs to include in the snapshot, comma-separated
-  --replace: Overwrite a case with the same name
+  --replace: Overwrite a case with the same name; one of `true`, `false`
 
 ### `reviewers case list`
 
 A Reviewer's cases
 
   <REVIEWER> (required)
-  --json
+  --json: one of `true`, `false`
 
 ### `reviewers case update`
 
@@ -176,7 +176,7 @@ Rename a case or flip its expected verdict
 
   <CASE> (required)
   --name <NAME>
-  --expect <EXPECT>
+  --expect <EXPECT>: one of `approved`, `blocked`
 
 ### `reviewers case remove`
 
@@ -190,8 +190,8 @@ Run a Reviewer's eval cases and record the score
 
   <REVIEWER> (required): Name, slug or id
   --only <ONLY>: Only cases whose name contains this
-  --record: Also keep each judged case as an eval run, so `reviewers run <id> --session` can show it
-  --json
+  --record: Also keep each judged case as an eval run, so `reviewers run <id> --session` can show it; one of `true`, `false`
+  --json: one of `true`, `false`
 
 ### `reviewers evals`
 
@@ -200,13 +200,13 @@ A Reviewer's eval history, newest first
   <REVIEWER> (required)
   --limit <LIMIT>
   --delete <DELETE>: Delete one batch instead
-  --json: Print JSON instead of text, for agents and scripts
+  --json: Print JSON instead of text, for agents and scripts; one of `true`, `false`
 
 ### `reviewers repos`
 
 Repos Reviewers judge
 
-  --json: Print JSON instead of text, for agents and scripts
+  --json: Print JSON instead of text, for agents and scripts; one of `true`, `false`
 
 ### `reviewers init`
 
@@ -219,40 +219,40 @@ Start judging this repo (or PATH): register it and install its hooks
 Install the hooks in this repo (or PATH), or in every repo with --all
 
   <PATH>
-  --all
-  --take-over: Replace Personal Workspace's hooks
+  --all: one of `true`, `false`
+  --take-over: Replace Personal Workspace's hooks; one of `true`, `false`
 
 ### `reviewers hooks status`
 
 Which repos have the hooks
 
-  --json
+  --json: one of `true`, `false`
 
 ### `reviewers model`
 
 Show or set the default model Reviewers run on
 
   <MODEL>: A model id or alias, or `default` to use Claude Code's own default
-  --repo: Set it for this repo only
+  --repo: Set it for this repo only; one of `true`, `false`
 
 ### `reviewers import`
 
 Bring over Reviewers, history and evals from Personal Workspace
 
   --from <FROM>: Personal Workspace's database. Defaults to ~/apps/personalworkspace/.data/workspace.sqlite
-  --hooks: Also switch every imported repo's git hooks from Personal Workspace to reviewers
+  --hooks: Also switch every imported repo's git hooks from Personal Workspace to reviewers; one of `true`, `false`
 
 ### `reviewers classifier status`
 
 What's connected, the cutoffs, and what it cleared lately
 
-  --json
+  --json: one of `true`, `false`
 
 ### `reviewers classifier connect`
 
 Connect Jev with a key, read from a hidden prompt or from stdin. One small call checks it first
 
-  <PROVIDER> (required)
+  <PROVIDER> (required): one of `jev` (TypeSafe's own API, with a TypeSafe key), `gateway` (Jev through the Vercel AI Gateway, with an AI Gateway key)
   --endpoint <ENDPOINT>: A SystemOne-compatible URL of your own, instead of the provider's
 
 ### `reviewers classifier disconnect`
@@ -270,19 +270,19 @@ Show or set the default cutoff, from 0 to 1. Under it, the classifier clears a R
 Replay recent commits through the classifier: what it would have cleared, and any block it would have missed
 
   --runs <RUNS>: How many recent commits
-  --json
+  --json: one of `true`, `false`
 
 ### `reviewers skill install`
 
 Find the coding agents on this machine and give each the skill
 
-  --json
+  --json: one of `true`, `false`
 
 ### `reviewers skill status`
 
 Where the skill is, and which agents have it
 
-  --json
+  --json: one of `true`, `false`
 
 ### `reviewers skill uninstall`
 
@@ -292,14 +292,14 @@ Take the skill away from every agent
 
 Update reviewers to the latest release
 
-  --check: Only say whether a newer release exists
+  --check: Only say whether a newer release exists; one of `true`, `false`
 
 ### `reviewers help`
 
 What you can do. Agents: `reviewers help --agent`
 
   <TOPIC>: A topic: writing, evals, onboarding, hooks, classifier, commands
-  --agent: The full guide for coding agents: how Reviewers work and every command
+  --agent: The full guide for coding agents: how Reviewers work and every command; one of `true`, `false`
 
 
 ## Topics
@@ -391,7 +391,7 @@ At the end the person picks which Reviewers start on, and the commit hook is ins
 reviewers hook commit-msg "$1"
 ```
 
-- **commit-msg** takes the staged diff and runs every enabled Reviewer whose scope and `--paths` match, all at once. Each is a read-only Claude Code session in the repo: it can open any file, but can't change anything or run commands. If any blocks, the commit stops with the file, lines and fix for each block. If a Reviewer can't reach a verdict (a crash, a timeout), the commit stops too: it fails closed.
+- **commit-msg** takes the staged diff and runs every enabled Reviewer whose scope and `--paths` match, all at once. Each is a read-only Claude Code session in the repo: it can open any file, but can't change anything or run commands. If any blocks, the commit stops with the file, lines and fix for each block. If a Reviewer can't reach a verdict (a crash, a timeout), the commit stops too: it fails closed. With a classifier connected, one quick call first clears the Reviewers the change can't concern, and only the rest start a session (`reviewers help classifier`).
 - **post-commit** ties the landed commit to the review that let it through, so the history shows which commit each review became.
 
 Skip the hooks once with `REVIEWERS_BYPASS=1 git commit …`. Agents shouldn't, unless the person asks.

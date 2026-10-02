@@ -109,7 +109,7 @@ pub fn list(all: bool, json: bool) -> Outcome {
                 json!({
                     "id": reviewer.id, "slug": reviewer.slug, "name": reviewer.name, "enabled": reviewer.enabled,
                     "scope": reviewer.scope, "repos": reviewer.project_ids.iter().filter_map(|id| projects.iter().find(|p| &p.id == id).map(|p| p.name.clone())).collect::<Vec<_>>(),
-                    "paths": reviewer.paths, "version": reviewer.version,
+                    "paths": reviewer.paths, "version": reviewer.version, "classifier": reviewer.classifier,
                     "runs": record.map(|r| r.runs).unwrap_or(0), "blocked": record.map(|r| r.blocked).unwrap_or(0),
                 })
             })
@@ -173,6 +173,13 @@ pub fn show(handle: &str, limit: u32, json: bool) -> Outcome {
         if reviewer.paths.is_empty() { String::new() } else { format!(" · only {}", reviewer.paths.join(", ")) },
         reviewer.model.as_ref().map(|model| format!(" · model {model}")).unwrap_or_default()
     )));
+    if crate::classifier::connected().is_some() {
+        let setting = match crate::review::classifier_cutoff(&store, &reviewer) {
+            Some(cutoff) => format!("Classifier clears it under {}{}", crate::review::percent(cutoff), if reviewer.classifier == ClassifierUse::Default { " (the default)" } else { "" }),
+            None => "Classifier: off, it always runs".to_string(),
+        };
+        println!("{}", ui::dim(&setting));
+    }
     println!("\n{}\n", reviewer.instruction);
     if let Some(why) = reviewer.origin.get("why").and_then(|why| why.as_str()) {
         println!("{} {why}\n", ui::dim("Why:"));

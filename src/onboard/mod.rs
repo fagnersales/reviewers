@@ -842,6 +842,9 @@ pub fn run(args: OnboardArgs) -> Outcome {
     if off > 0 {
         ui::line(&ui::dim("`reviewers list --all` shows them; `reviewers enable <name>` turns one on."));
     }
+    if crate::classifier::connected().is_none() {
+        ui::line(&ui::dim("Optional: with a Vercel AI Gateway or TypeSafe key, `reviewers classifier connect` skips the Reviewers a commit can't concern."));
+    }
     ui::outro(&format!(
         "Saved to {}  {}",
         home_path(&directory),

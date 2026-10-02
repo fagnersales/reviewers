@@ -37,6 +37,20 @@ fn argument_line(argument: &clap::Arg) -> Option<String> {
         None => format!("<{}>", id.to_uppercase()),
     };
     let required = if argument.is_required_set() { " (required)" } else { "" };
+    let values: Vec<String> = argument
+        .get_possible_values()
+        .iter()
+        .filter(|value| !value.is_hide_set())
+        .map(|value| match value.get_help() {
+            Some(help) => format!("`{}` ({})", value.get_name(), help.to_string().trim_end_matches('.')),
+            None => format!("`{}`", value.get_name()),
+        })
+        .collect();
+    let help = match (help.is_empty(), values.is_empty()) {
+        (_, true) => help,
+        (true, false) => format!("one of {}", values.join(", ")),
+        (false, false) => format!("{help}; one of {}", values.join(", ")),
+    };
     Some(format!("  {name}{required}{}", if help.is_empty() { String::new() } else { format!(": {help}") }))
 }
 
