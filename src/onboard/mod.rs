@@ -1,7 +1,7 @@
 pub mod digest;
 pub mod transcripts;
 
-use crate::claude::{self, Activity, Request, Tokens};
+use crate::agent::{self, Activity, Provider, Request, Tokens};
 use crate::commands::Outcome;
 use crate::commands::onboard::OnboardArgs;
 use crate::store::{ClassifierUse, NewReviewer, Scope, Store};
@@ -20,7 +20,7 @@ const EXTRACT: &str = include_str!("extract.md");
 const MERGE: &str = include_str!("merge.md");
 const ATTEMPTS: usize = 2;
 const EVIDENCE_PER_REVIEWER: usize = 4;
-/// The first run turns on the strongest rules, up to this many: every one is a Claude session on every commit it applies to.
+/// The first run turns on the strongest rules, up to this many: every one is an agent session on every commit it applies to.
 const STARTING_REVIEWERS: usize = 10;
 /// Past this many, each Reviewer gets one line; the full instructions are in the files.
 const DETAILED_LIST_LIMIT: usize = 20;
@@ -145,6 +145,12 @@ fn fill(template: &str, values: &[(&str, &str)]) -> String {
 
 /// `claude-opus-5-5` → "Opus 5.5", `claude-haiku-4-5-20251001` → "Haiku 4.5".
 pub fn model_label(id: &str) -> String {
+    if id == "codex" {
+        return "Codex (default)".into();
+    }
+    if let Some(model) = id.strip_prefix("codex:") {
+        return format!("Codex · {model}");
+    }
     static PATTERN: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
     let pattern = PATTERN.get_or_init(|| Regex::new(r"^claude-([a-z]+)-(\d+)(?:-(\d{1,2}))?(?:-\d{8})?$").expect("the pattern compiles"));
     let bare = id.split('[').next().unwrap_or(id);
@@ -163,9 +169,10 @@ pub fn model_label(id: &str) -> String {
 }
 
 /// The models this person actually ran, most used lately first, then the latest of each family they never touched.
-fn model_choices(usage: &[transcripts::ModelUsage]) -> Vec<(String, ui::Choice)> {
+fn model_choices(usage: &[transcripts::ModelUsage], claude: bool, codex: bool) -> Vec<(String, ui::Choice)> {
     let mut choices: Vec<(String, ui::Choice)> = usage
         .iter()
+        .filter(|model| match agent::selection(Some(&model.id)).0 { Provider::Claude => claude, Provider::Codex => codex })
         .take(4)
         .map(|model| {
             let hint = if model.recent_sessions > 0 {
@@ -177,9 +184,12 @@ fn model_choices(usage: &[transcripts::ModelUsage]) -> Vec<(String, ui::Choice)>
         })
         .collect();
     for family in ["opus", "sonnet", "haiku"] {
-        if !choices.iter().any(|(id, _)| id.split('-').nth(1) == Some(family)) {
+        if claude && !choices.iter().any(|(id, _)| id.split('-').nth(1) == Some(family)) {
             choices.push((family.to_string(), ui::Choice { label: format!("{}{} (latest)", family[..1].to_uppercase(), &family[1..]), hint: String::new() }));
         }
+    }
+    if codex {
+        choices.push(("codex".into(), ui::Choice { label: model_label("codex"), hint: "Codex CLI's default model".into() }));
     }
     choices
 }
@@ -217,6 +227,7 @@ fn describe(activity: &Activity, job: &Job) -> Option<String> {
                 "Read" => format!("Reading {}", field("file_path")),
                 "Grep" => format!("Searching \"{}\"{}", field("pattern"), if field("path").is_empty() { String::new() } else { format!(" in {}", field("path")) }),
                 "Glob" => format!("Listing {}", field("pattern")),
+                "Shell" => format!("Reading · {}", field("command")),
                 other => other.to_string(),
             })
         }
@@ -276,7 +287,7 @@ fn extract(jobs: &[Job], parallel: usize, model: Option<&str>, live: bool) -> (V
                     let add_dirs: Vec<PathBuf> = job.stretches.iter().map(|stretch| stretch.root.clone()).collect();
                     for attempt in 0..ATTEMPTS {
                         let _ = sender.send(JobEvent::Started(index));
-                        let result = claude::run(
+                        let result = agent::run(
                             &Request {
                                 prompt: &prompt,
                                 cwd: &job.directory,
@@ -409,7 +420,7 @@ fn plan_merge(candidates: &[Candidate], directory: &Path, model: Option<&str>, s
         })
         .collect();
     let prompt = fill(MERGE, &[("REPORTS", &serde_json::to_string_pretty(&reports).unwrap_or_default())]);
-    let outcome = claude::run(
+    let outcome = agent::run(
         &Request {
             prompt: &prompt,
             cwd: directory,
@@ -731,9 +742,6 @@ fn activate(store: &Store, suggestions: &[Suggestion], chosen: &[&RepoSummary], 
 pub fn run(args: OnboardArgs) -> Outcome {
     let interactive = ui::interactive() && !args.yes;
     let live = ui::stdout_is_tty();
-    if !claude::is_installed() {
-        return Err("onboarding runs on Claude Code, and `claude` isn't on this machine's PATH".into());
-    }
     let stamp = crate::util::now_iso()[..16].replace([':', 'T'], "-");
     let directory = crate::util::data_dir().join("onboard").join(stamp);
     std::fs::create_dir_all(&directory).map_err(|error| format!("cannot create {}: {error}", directory.display()))?;
@@ -741,7 +749,7 @@ pub fn run(args: OnboardArgs) -> Outcome {
     let started = Instant::now();
     let stopped_in = directory.clone();
     let _ = ctrlc::set_handler(move || {
-        claude::stop_all();
+        agent::stop_all();
         ui::restore_cursor();
         println!("\n{}  Stopped. What was read so far is in {}\n", ui::red(ui::STEP_CANCEL), home_path(&stopped_in));
         std::process::exit(130);
@@ -783,7 +791,9 @@ pub fn run(args: OnboardArgs) -> Outcome {
         return Ok(0);
     }
 
-    let choices = model_choices(&scan.models);
+    let claude_installed = agent::is_installed(Provider::Claude);
+    let codex_installed = agent::is_installed(Provider::Codex);
+    let choices = model_choices(&scan.models, claude_installed || args.dry_run, codex_installed || args.dry_run);
     let model: Option<String> = match &args.model {
         Some(model) => Some(model.clone()),
         None if interactive && !choices.is_empty() => {
@@ -806,6 +816,11 @@ pub fn run(args: OnboardArgs) -> Outcome {
     if args.dry_run {
         ui::outro(&format!("Material for {} written to {}", plural(jobs.len(), "agent"), home_path(&directory)));
         return Ok(0);
+    }
+    let provider = agent::selection(model.as_deref()).0;
+    if !match provider { Provider::Claude => claude_installed, Provider::Codex => codex_installed } {
+        let cli = match provider { Provider::Claude => "claude", Provider::Codex => "codex" };
+        return Err(format!("onboarding needs `{cli}` on PATH for this model; install it and sign in, or choose another --model"));
     }
 
     let (candidates, extract_tokens, failed) = extract(&jobs, args.parallel.max(1), model.as_deref(), live);
@@ -835,6 +850,11 @@ pub fn run(args: OnboardArgs) -> Outcome {
 
     let store = Store::open_default()?;
     let (on, off, hooked) = activate(&store, &suggestions, &chosen, interactive, args.yes, &directory)?;
+    // New Reviewers inherit this setting. A Codex-only installation must not
+    // silently switch to Claude when its first commit is reviewed.
+    if store.setting("default_model")?.is_none() {
+        store.set_setting("default_model", model.as_deref())?;
+    }
     let skill_agents = if args.no_skill { 0 } else { skill::install().map(|placements| placements.iter().filter(|placement| placement.state == "linked").count()).unwrap_or(0) };
     let tokens = extract_tokens + merge_tokens;
     ui::line("");
@@ -857,4 +877,56 @@ pub fn run(args: OnboardArgs) -> Outcome {
         ui::dim(&format!("{} · {} tokens read · {} written", duration(started.elapsed().as_millis() as u64), compact(tokens.read), compact(tokens.written)))
     ));
     Ok(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Explicit opt-in: uses the signed-in Codex CLI and consumes model tokens.
+    #[test]
+    #[ignore = "requires an authenticated recent Codex CLI"]
+    fn live_codex_accepts_review_extract_and_merge_schemas() {
+        let directory = std::env::temp_dir();
+        for (schema, prompt, key) in [
+            (crate::review::prompt::decision_schema(), "Return an approved verdict with summary and reasoning saying there is no diff to review. Evidence is empty. Do not use tools.", "verdict"),
+            (extract_schema(), "There are no user messages. Return an empty rules array. Do not use tools.", "rules"),
+            (merge_schema(), "There are no candidates. Return an empty reviewers array. Do not use tools.", "reviewers"),
+        ] {
+            let outcome = agent::run(&Request {
+                prompt, cwd: &directory, schema: &schema, tools: &[], allowed_tools: &[], add_dirs: &[],
+                model: Some("codex"), timeout: Some(Duration::from_secs(90)), live: false,
+            }, &mut |_| {}).unwrap_or_else(|error| panic!("{key}: {error}"));
+            assert!(outcome.output.get(key).is_some(), "{key}: {}", outcome.output);
+        }
+        let directory = std::env::temp_dir().join(crate::util::new_id("reviewers-live-codex"));
+        std::fs::create_dir(&directory).unwrap();
+        let marker = crate::util::new_id("marker");
+        std::fs::write(directory.join("marker.txt"), &marker).unwrap();
+        let outcome = agent::run(&Request {
+            prompt: "Read marker.txt using a read-only shell command. Return approved, put its exact contents in summary, and explain in reasoning that you read the file. Do not modify anything.",
+            cwd: &directory, schema: &crate::review::prompt::decision_schema(), tools: &["Read", "Grep", "Glob"], allowed_tools: &["Read", "Grep", "Glob"], add_dirs: &[],
+            model: Some("codex"), timeout: Some(Duration::from_secs(90)), live: false,
+        }, &mut |_| {});
+        let unchanged = std::fs::read_to_string(directory.join("marker.txt")).unwrap();
+        std::fs::remove_dir_all(&directory).unwrap();
+        let outcome = outcome.unwrap();
+        assert_eq!(outcome.output["summary"], marker);
+        assert_eq!(unchanged, marker);
+        assert!(outcome.tool_calls > 0);
+    }
+
+    #[test]
+    fn model_picker_only_offers_installed_providers() {
+        assert_eq!(OnboardArgs::default().since, 90);
+        assert_eq!(OnboardArgs::default().parallel, 8);
+        let usage = vec![
+            transcripts::ModelUsage { id: "claude-test".into(), sessions: 5, recent_sessions: 5 },
+            transcripts::ModelUsage { id: "codex:test-model".into(), sessions: 3, recent_sessions: 3 },
+        ];
+        let codex = model_choices(&usage, false, true);
+        assert_eq!(codex.iter().map(|(id, _)| id.as_str()).collect::<Vec<_>>(), ["codex:test-model", "codex"]);
+        assert!(model_choices(&usage, true, false).iter().all(|(id, _)| !id.starts_with("codex")));
+        assert!(model_choices(&usage, false, false).is_empty());
+    }
 }

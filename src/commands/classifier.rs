@@ -76,7 +76,7 @@ fn status(json_output: bool) -> Outcome {
         }));
     }
     let Some(connection) = connection else {
-        println!("No classifier connected, so every Reviewer runs a Claude session on every commit it applies to.");
+        println!("No classifier connected, so every Reviewer runs a reviewer session on every commit it applies to.");
         println!("{}", ui::dim("Connect one: `reviewers classifier connect gateway` (an AI Gateway key) or `reviewers classifier connect jev` (a TypeSafe key)."));
         return Ok(0);
     };
@@ -131,7 +131,7 @@ fn connect(provider: Provider, endpoint: Option<String>) -> Outcome {
     println!("Connected {} {}", ui::bold(provider.label()), ui::dim(&format!("(key {})", connection.key_hint())));
     println!(
         "{}",
-        ui::dim("Reviewers a change can't concern are now cleared without a Claude session. `reviewers classifier check` replays your recent commits to show what it would have skipped.")
+        ui::dim("Reviewers a change can't concern are now cleared without a reviewer session. `reviewers classifier check` replays your recent commits to show what it would have skipped.")
     );
     Ok(0)
 }
@@ -172,7 +172,7 @@ struct Tally {
     scores: Vec<(f64, bool, u64)>,
 }
 
-/// A decision a Claude session actually reached: the classifier is measured against those only.
+/// A decision a reviewer session actually reached: the classifier is measured against those only.
 fn judged_by_a_session(decision: &crate::store::Decision) -> bool {
     decision.reused_from.is_none() && decision.usage.turns > 0
 }

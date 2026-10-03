@@ -72,7 +72,7 @@ pub fn review_prompt(input: &PromptInput) -> String {
         "Judge the supplied diff against the single instruction below, and nothing else.".into(),
         "Do not perform a general code review. Do not comment on unrelated quality.".into(),
         String::new(),
-        "The diff is what is under judgment. Your working directory is the repository root with the change already applied, so a changed file on disk is its post-change version. Use Read, Grep and Glob to see what the diff does not show — the rest of a changed file, its sibling files, an existing module the instruction points at — whenever the instruction cannot be judged from the hunks alone. Never modify anything.".into(),
+        "The diff is what is under judgment. Your working directory is the repository root with the change already applied, so a changed file on disk is its post-change version. Use the available read-only tools to see what the diff does not show — the rest of a changed file, its sibling files, an existing module the instruction points at — whenever the instruction cannot be judged from the hunks alone. Never modify anything.".into(),
         String::new(),
         "Evidence must quote changed lines from the diff: lines added, or lines removed. What you read elsewhere in the repository informs the reasoning but is not evidence by itself.".into(),
         "If you block, cite exact files and lines from the diff, and say in each explanation what the code should do instead: the agent that wrote it reads your answer and fixes the code from it.".into(),

@@ -1,5 +1,5 @@
 //! The classifier: a cheap first pass that clears the Reviewers a change can't concern, so they
-//! don't start a Claude session. It asks Jev, an evaluation model, one closed question per
+//! don't start a reviewer session. It asks Jev, an evaluation model, one closed question per
 //! Reviewer in a single call: does this change break the rule? An answer under the Reviewer's
 //! cutoff clears it. The classifier never blocks: a high score, or any failure, and the Reviewer
 //! runs as usual.
@@ -144,7 +144,7 @@ pub struct Classified {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Outcome {
-    /// Under the cutoff: approved without a Claude session.
+    /// Under the cutoff: approved without a reviewer session.
     Cleared,
     /// At or over the cutoff: the Reviewer ran as usual.
     Escalated,

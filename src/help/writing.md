@@ -33,6 +33,10 @@ A new instruction is a new version (`reviewers edit <name> --instruction "…"`)
 
 A Reviewer runs on its own model if it has one (`--model sonnet`), else the repo's (`reviewers model sonnet --repo`), else the default (`reviewers model sonnet`), else Claude Code's own. Any id or alias `claude --model` accepts works. `default` clears a level: `reviewers edit <name> --model default`, `reviewers model default --repo`, `reviewers model default`.
 
+Use `codex` for Codex's built-in default or `codex:<model-id>` for a specific Codex model at any of those levels. Unqualified ids and aliases retain their Claude meaning; `claude:<model-id>` is also accepted. These settings apply to evals as well as commit reviews. The transcript source does not determine which provider runs a Reviewer.
+
+Codex needs a recent CLI supporting `exec --json --output-schema --ephemeral --ignore-user-config --ignore-rules`, installed and signed in. Runs use its read-only sandbox with approvals, hooks, web search and subagents disabled. User configuration and execution rules are ignored; saved CLI authentication is reused. The merge step also disables shell tools. Custom model ids should be supplied explicitly; custom providers configured only in user settings are not loaded.
+
 ## Cost
 
-Every Reviewer that applies is a Claude session on every commit, all of them in parallel. A commit waits for the slowest. Ten Reviewers that each take 30 seconds still cost ten sessions of tokens. A rule a linter can enforce should be a lint rule.
+Every Reviewer that applies is an agent session on every commit, all of them in parallel. A commit waits for the slowest. Ten Reviewers that each take 30 seconds still cost ten sessions of tokens. A rule a linter can enforce should be a lint rule.
