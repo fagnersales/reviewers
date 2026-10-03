@@ -1,5 +1,12 @@
 use super::Outcome;
-use clap::Args;
+use clap::{Args, ValueEnum};
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, ValueEnum)]
+pub enum ContextScope {
+    #[default]
+    All,
+    Project,
+}
 
 #[derive(Args)]
 pub struct OnboardArgs {
@@ -9,6 +16,12 @@ pub struct OnboardArgs {
     /// Only these repos, by folder name, comma-separated (skips the repo picker).
     #[arg(long)]
     pub repos: Option<String>,
+    /// Pool evidence from all selected repos, or keep each project's evidence separate (skips the picker).
+    #[arg(long, value_enum)]
+    pub context: Option<ContextScope>,
+    /// Read sessions in the window again, including ones already read.
+    #[arg(long)]
+    pub reread: bool,
     /// The model for extraction and merging: a Claude id/alias, `codex:<model>` or `codex` (skips the picker).
     #[arg(long)]
     pub model: Option<String>,
@@ -32,7 +45,7 @@ pub struct OnboardArgs {
 // Bare `reviewers` enters onboarding without Clap parsing this subcommand.
 impl Default for OnboardArgs {
     fn default() -> Self {
-        Self { since: 90, repos: None, model: None, parallel: 8, max: None, yes: false, dry_run: false, no_skill: false }
+        Self { since: 90, repos: None, context: None, reread: false, model: None, parallel: 8, max: None, yes: false, dry_run: false, no_skill: false }
     }
 }
 
