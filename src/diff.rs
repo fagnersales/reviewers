@@ -27,6 +27,34 @@ pub fn has_reviewable_content(diff: &str) -> bool {
         .any(|line| (line.starts_with('+') && !line.starts_with("+++")) || (line.starts_with('-') && !line.starts_with("---")))
 }
 
+/// The diff cut at each `diff --git` line, one piece per file.
+pub fn file_sections(diff: &str) -> Vec<&str> {
+    let mut starts: Vec<usize> = diff.match_indices("diff --git ").map(|(index, _)| index).filter(|index| *index == 0 || diff.as_bytes()[index - 1] == b'\n').collect();
+    if starts.first() != Some(&0) {
+        starts.insert(0, 0);
+    }
+    starts.iter().enumerate().map(|(position, start)| &diff[*start..starts.get(position + 1).copied().unwrap_or(diff.len())]).filter(|section| !section.trim().is_empty()).collect()
+}
+
+/// Each generated file keeps its header, but its hunks become one line saying how much changed:
+/// a regenerated client can run to thousands of lines no Reviewer needs to read.
+pub fn collapse_generated(diff: &str, generated: &[String]) -> String {
+    file_sections(diff)
+        .into_iter()
+        .map(|section| {
+            let is_generated = changed_paths(section).first().is_some_and(|path| generated.contains(path));
+            let hunks_start = section.match_indices("\n@@").next().map(|(index, _)| index + 1);
+            let (true, Some(hunks_start)) = (is_generated, hunks_start) else {
+                return section.to_string();
+            };
+            let (header, hunks) = section.split_at(hunks_start);
+            let added = hunks.lines().filter(|line| line.starts_with('+')).count();
+            let removed = hunks.lines().filter(|line| line.starts_with('-')).count();
+            format!("{header}Generated file (linguist-generated in .gitattributes): {added} lines added, {removed} removed, not shown.\n")
+        })
+        .collect()
+}
+
 pub fn hash(diff: &str) -> String {
     crate::util::sha256_hex(diff)
 }
@@ -100,6 +128,18 @@ mod tests {
         assert_eq!(changed_paths(DIFF), vec!["src/a.ts", "gone.ts"]);
         assert!(has_reviewable_content(DIFF));
         assert!(!has_reviewable_content("diff --git a/x b/x\nold mode 100644\nnew mode 100755\n"));
+    }
+
+    #[test]
+    fn generated_files_keep_their_header_but_not_their_lines() {
+        let generated = "diff --git a/convex/_generated/api.d.ts b/convex/_generated/api.d.ts\nindex 1..2 100644\n--- a/convex/_generated/api.d.ts\n+++ b/convex/_generated/api.d.ts\n@@ -1,2 +1,3 @@\n-one\n+uno\n+dos\n same\n";
+        let collapsed = collapse_generated(&format!("{generated}{DIFF}"), &["convex/_generated/api.d.ts".to_string()]);
+        assert!(collapsed.starts_with("diff --git a/convex/_generated/api.d.ts b/convex/_generated/api.d.ts\nindex 1..2 100644\n--- a/convex/_generated/api.d.ts\n+++ b/convex/_generated/api.d.ts\nGenerated file"));
+        assert!(collapsed.contains("2 lines added, 1 removed, not shown.\n") && !collapsed.contains("+uno"));
+        assert!(collapsed.ends_with(DIFF));
+        assert_eq!(changed_paths(&collapsed), vec!["convex/_generated/api.d.ts", "src/a.ts", "gone.ts"]);
+        assert!(!has_reviewable_content(&collapse_generated(generated, &["convex/_generated/api.d.ts".to_string()])));
+        assert_eq!(collapse_generated(DIFF, &[]), DIFF);
     }
 
     #[test]

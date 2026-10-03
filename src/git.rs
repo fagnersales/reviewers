@@ -1,5 +1,6 @@
+use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 pub struct GitOutput {
     pub stdout: String,
@@ -121,11 +122,49 @@ pub fn remote_url(root: &Path) -> Option<String> {
 }
 
 pub fn staged_diff(root: &Path) -> Result<String, String> {
-    ok(root, &["diff", "--cached", "--no-ext-diff"])
+    ok(root, &["diff", "--cached", "--no-ext-diff"]).map(|diff| without_generated(root, &diff))
 }
 
+/// Collapsed the way `staged_diff` collapses it, so a commit's diff hashes like the review of it.
 pub fn commit_diff(root: &Path, reference: &str) -> Result<String, String> {
-    ok(root, &["show", "--format=", "--no-ext-diff", reference])
+    ok(root, &["show", "--format=", "--no-ext-diff", reference]).map(|diff| without_generated(root, &diff))
+}
+
+/// The diff with the files `.gitattributes` marks `linguist-generated` collapsed to a line each.
+pub fn without_generated(root: &Path, diff: &str) -> String {
+    let generated = generated_paths(root, &crate::diff::changed_paths(diff));
+    if generated.is_empty() { diff.to_string() } else { crate::diff::collapse_generated(diff, &generated) }
+}
+
+/// Read from the index, which matches HEAD right after a commit, so the hook and post-commit agree.
+/// Any failure reads as no generated files: the Reviewers then see everything.
+fn generated_paths(root: &Path, paths: &[String]) -> Vec<String> {
+    if paths.is_empty() {
+        return Vec::new();
+    }
+    let child = Command::new("git")
+        .args(["check-attr", "--cached", "-z", "--stdin", "linguist-generated"])
+        .current_dir(root)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn();
+    let Ok(mut child) = child else {
+        return Vec::new();
+    };
+    let input: String = paths.iter().map(|path| format!("{path}\0")).collect();
+    if let Some(mut stdin) = child.stdin.take() {
+        let _ = stdin.write_all(input.as_bytes());
+    }
+    let Ok(output) = child.wait_with_output() else {
+        return Vec::new();
+    };
+    if !output.status.success() {
+        return Vec::new();
+    }
+    let text = String::from_utf8_lossy(&output.stdout);
+    let fields: Vec<&str> = text.split('\0').collect();
+    fields.chunks_exact(3).filter(|entry| matches!(entry[2], "set" | "true")).map(|entry| entry[0].to_string()).collect()
 }
 
 pub struct CommitInfo {
@@ -155,4 +194,25 @@ pub fn attempted_message(message_file: &Path) -> Option<String> {
 
 pub fn head_sha(root: &Path) -> Result<String, String> {
     ok(root, &["rev-parse", "HEAD"]).map(|sha| sha.trim().to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn staged_diff_collapses_files_marked_generated() {
+        let repo = std::env::temp_dir().join(crate::util::new_id("generated"));
+        std::fs::create_dir_all(repo.join("convex/_generated")).unwrap();
+        ok(&repo, &["init", "-q"]).unwrap();
+        std::fs::write(repo.join(".gitattributes"), "convex/_generated/** linguist-generated\n").unwrap();
+        std::fs::write(repo.join("convex/_generated/api.d.ts"), "export type Api = {};\n".repeat(500)).unwrap();
+        std::fs::write(repo.join("users.ts"), "export const user = 1;\n").unwrap();
+        ok(&repo, &["add", "."]).unwrap();
+        let diff = staged_diff(&repo).unwrap();
+        let _ = std::fs::remove_dir_all(&repo);
+        assert!(diff.contains("Generated file (linguist-generated in .gitattributes): 500 lines added, 0 removed, not shown."), "{diff}");
+        assert!(diff.contains("+export const user = 1;") && diff.contains("+convex/_generated/** linguist-generated"));
+        assert!(!diff.contains("export type Api"));
+    }
 }
