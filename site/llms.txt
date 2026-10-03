@@ -22,6 +22,10 @@ A commit that ends "could not reach a verdict" means a Reviewer crashed or timed
 3. Otherwise write it: `reviewers new --name "…" --instruction "…"` (this repo) or with `--everywhere` (a personal rule for every repo). Add `--paths` when it only concerns part of the repo. `reviewers help writing` covers the instruction.
 4. Give it cases, at least one diff it must block and one it must approve, and run the evals before calling it done (`reviewers help evals`).
 
+## When asked to find new Reviewers
+
+`reviewers suggest` reads the person's sessions since the last read and suggests new Reviewers, each with why and the person's own words. It runs several agent sessions, so run it only when the person asks. Without a terminal it adds nothing: show the person the suggestions, and add the ones they pick with `reviewers new`; each suggestion's full instruction is in the run folder it prints. `--yes` adds them all.
+
 ## When asked how the Reviewers are doing
 
 `reviewers stats --json` (this repo) or `--all`: commits judged, blocks, wait, tokens, and per Reviewer: block rate, time, tokens per catch, and `neverBlocks` for one that hasn't blocked in 50+ runs. A Reviewer that never blocks is a candidate for a lint rule or for turning off. Draw a chart when it helps; the data is all in the JSON.
@@ -65,6 +69,7 @@ Files, in `~/.reviewers` (or `REVIEWERS_HOME`):
 - `hooks/`: the global hooks, when `reviewers hooks install --global` is on.
 - `classifier.json`: the classifier's provider and key, readable by the owner only.
 - `onboard/<date>/`: what each first run read and found.
+- `suggest/<date>/`: what each `reviewers suggest` read and found; `suggest/state.json`: how far each repo's sessions have been read, and the rules seen once that wait to come up again.
 
 The skill itself is `~/.agents/skills/reviewers`, linked into each agent's skills folder (`reviewers skill install --json` lists them).
 
@@ -86,6 +91,18 @@ Read your agent sessions and turn the rules you keep repeating into Reviewers
   --yes: Take the defaults without asking: every repo, your usual model, the strongest Reviewers on, hooks installed
   --dry-run: Build the material and stop before any agent runs
   --no-skill: Don't give your coding agents the reviewers skill
+
+### `reviewers suggest`
+
+Read only the sessions since the last read and suggest new Reviewers, each with why and the words behind it
+
+  --since <SINCE>: How far back to read at most, in days (default: 90)
+  --reread: Read every session in the window again, even the ones already read
+  --repos <REPOS>: Only these repos, by folder name, comma-separated
+  --model <MODEL>: The model the agents run on: a Claude id or alias, `codex`, or `codex:<model-id>`. Defaults to the one you used most lately
+  --parallel <PARALLEL>: Agents running at once (default: 8)
+  --max <MAX>: At most this many suggestions
+  --yes: Add every suggestion without asking
 
 ### `reviewers status`
 
@@ -439,11 +456,19 @@ The person picks the repos and the model (the default is the one they used most 
 
 The picker offers models for installed CLIs. `--model codex` uses Codex's built-in default; `--model codex:<model-id>` selects a Codex model. Claude ids and aliases still work. Either provider can read both transcript sources, and the same selection runs extraction and merging. If no review default is configured, a Codex selection is also saved for subsequent reviews and evals; a Claude selection only reads the transcripts. `--dry-run` builds the material without requiring either CLI or sending anything to a model.
 
-A rule must have come up at least twice, or have been stated as a standing rule ("always", "never"). Rules a linter could enforce are listed apart.
+A rule must have come up at least twice, or have been stated as a standing rule ("always", "never"). Rules a linter could enforce are left out: a lint rule is instant and costs no tokens.
 
 At the end the person picks which Reviewers start on, and the global hooks are installed so every repo runs them, with each repo's own hooks still running first. Everything found, and every piece of evidence, is kept in `onboard/<date>/` in the data folder (`~/.reviewers`, or `REVIEWERS_HOME`).
 
-Running it again skips any suggestion with the same name as an existing Reviewer, ignoring case. The check is by name only, so the same rule under another name would be suggested again. `--since`, `--repos` and `--model` narrow it; `reviewers onboard --help` lists the rest.
+The merge is shown the Reviewers that already exist and leaves out a rule one of them already checks, even in other words; a suggestion with the same name as an existing Reviewer, ignoring case, is skipped too. `--since`, `--repos` and `--model` narrow it; `reviewers onboard --help` lists the rest.
+
+## Later: `reviewers suggest`
+
+`reviewers suggest` does the same over only what was typed since the last read, by onboarding or by an earlier `suggest`, and shows each new Reviewer with why it's suggested and the person's words behind it. Then the person picks which to add; the ones they add start on.
+
+How far each repo has been read is kept in `suggest/state.json` in the data folder, so a session is never sent to an agent twice. A repo whose agent failed is read again next time. `--reread` reads the whole window again, and `--since` caps how far back reading goes (90 days).
+
+A rule seen only once waits in the same file and is suggested once it comes up again, in any later run, within the window. Suggestions the person didn't pick are dropped; suggestions nobody was asked about (no terminal, or the picker cancelled) wait too. `--yes` adds every suggestion without asking.
 
 ---
 

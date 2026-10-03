@@ -3,6 +3,7 @@ pub mod onboard;
 pub mod repos;
 pub mod reviewers;
 pub mod runs;
+pub mod suggest;
 
 use crate::store::{Project, Store};
 use crate::{Command, git, ui};
@@ -45,6 +46,7 @@ pub fn dispatch(command: Option<Command>) -> Outcome {
     match command {
         None => first_or_status(),
         Some(Command::Onboard(args)) => onboard::run(args),
+        Some(Command::Suggest(args)) => suggest::run(args),
         Some(Command::Status(output)) => runs::status(output.json),
         Some(Command::List { all, output }) => reviewers::list(all, output.json),
         Some(Command::Show { reviewer, decisions, output }) => reviewers::show(&reviewer, decisions, output.json),

@@ -68,9 +68,9 @@ printf '%s\n' "$*" >> "$REVIEWERS_TEST_CALLS"
 prompt=$(cat)
 if [ "$REVIEWERS_TEST_RESULT" = failure ]; then echo 'test failure' >&2; exit 7; fi
 case "$prompt" in
-  'You are setting up Reviewers'*)
+  'You are finding Reviewers'*)
     case "$prompt" in *'Never use casts'*'Always validate input'*) ;; *) echo 'missing mixed transcripts' >&2; exit 8;; esac
-    answer='{"rules":[{"repo":"repo","name":"Validate input","instruction":"Block unvalidated input.","why":"Repeated instruction","timesSeen":3,"stated":true,"general":true,"paths":[],"lintable":false,"lintRule":"","evidence":[{"date":"2026-10-03","quote":"Always validate input"}]}]}' ;;
+    answer='{"rules":[{"repo":"repo","name":"Validate input","instruction":"Block unvalidated input.","why":"Repeated instruction","timesSeen":3,"stated":true,"general":true,"paths":[],"evidence":[{"date":"2026-10-03","quote":"Always validate input"}]}]}' ;;
   'Several agents just read'*) answer='{"reviewers":[{"name":"Validate input","scope":"everywhere","sources":["r1"],"instructionFrom":"r1"}]}' ;;
   *) answer='{"verdict":"approved","summary":"Valid input","reasoning":"No unvalidated input added.","evidence":null}' ;;
 esac

@@ -1,4 +1,4 @@
-You are setting up Reviewers for a developer who just installed them. Nobody has written a single Reviewer yet. Your job is to find the rules this person already holds, from what they told their coding agents and from what landed in their repos, and write each one as a Reviewer.
+You are finding Reviewers for a developer. Your job is to find the rules this person already holds, from what they told their coding agents and from what landed in their repos, and write each one as a Reviewer.
 
 ## What a Reviewer is
 
@@ -23,7 +23,7 @@ Report a rule only when it came up at least twice in your share, or the person s
 
 ## What is not a Reviewer
 
-- Anything a linter or type checker already enforces, or could enforce with a one-line config. Check the rule files above. If the rule is lintable, still report it, but set `lintable` and say which lint rule does it.
+- Anything a linter or type checker already enforces, or could enforce with a one-line config. Check the rule files above. Don't report it.
 - Instructions about how the agent should behave in chat: tone, reply length, asking before acting, git workflow, branch names. A Reviewer only sees code.
 - One-off feature requests and bug reports. "Make the button blue" is a task, not a rule.
 - Anything you can't tie to evidence. Don't invent rules that sound like good practice.

@@ -22,6 +22,10 @@ A commit that ends "could not reach a verdict" means a Reviewer crashed or timed
 3. Otherwise write it: `reviewers new --name "…" --instruction "…"` (this repo) or with `--everywhere` (a personal rule for every repo). Add `--paths` when it only concerns part of the repo. `reviewers help writing` covers the instruction.
 4. Give it cases, at least one diff it must block and one it must approve, and run the evals before calling it done (`reviewers help evals`).
 
+## When asked to find new Reviewers
+
+`reviewers suggest` reads the person's sessions since the last read and suggests new Reviewers, each with why and the person's own words. It runs several agent sessions, so run it only when the person asks. Without a terminal it adds nothing: show the person the suggestions, and add the ones they pick with `reviewers new`; each suggestion's full instruction is in the run folder it prints. `--yes` adds them all.
+
 ## When asked how the Reviewers are doing
 
 `reviewers stats --json` (this repo) or `--all`: commits judged, blocks, wait, tokens, and per Reviewer: block rate, time, tokens per catch, and `neverBlocks` for one that hasn't blocked in 50+ runs. A Reviewer that never blocks is a candidate for a lint rule or for turning off. Draw a chart when it helps; the data is all in the JSON.
@@ -65,6 +69,7 @@ Files, in `~/.reviewers` (or `REVIEWERS_HOME`):
 - `hooks/`: the global hooks, when `reviewers hooks install --global` is on.
 - `classifier.json`: the classifier's provider and key, readable by the owner only.
 - `onboard/<date>/`: what each first run read and found.
+- `suggest/<date>/`: what each `reviewers suggest` read and found; `suggest/state.json`: how far each repo's sessions have been read, and the rules seen once that wait to come up again.
 
 The skill itself is `~/.agents/skills/reviewers`, linked into each agent's skills folder (`reviewers skill install --json` lists them).
 
