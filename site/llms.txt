@@ -63,7 +63,7 @@ Files, in `~/.reviewers` (or `REVIEWERS_HOME`):
 
 The skill itself is `~/.agents/skills/reviewers`, linked into each agent's skills folder (`reviewers skill install --json` lists them).
 
-Exit codes: the commit hook exits 0 when every Reviewer approves, when only advisory ones block or fail, or when `REVIEWERS_BYPASS=1` skips it; 1 when a blocking Reviewer blocks; and 3 when the commit couldn't be reviewed (a blocking Reviewer reached no verdict, or Reviewers' data couldn't be read), which wins over 1. Anything but 0 stops the commit (`reviewers help hooks`). `reviewers eval` exits 1 when a case doesn't match. Every other command exits 0, or 1 with the error on stderr. A usage error (an unknown flag, a missing argument) exits 2 and prints the usage, from any command.
+Exit codes: the commit hook exits 0 when every Reviewer approves, when only advisory ones block or fail, or when `REVIEWERS_BYPASS=1` skips it; 1 when a blocking Reviewer blocks; and 3 when the commit couldn't be reviewed (a blocking Reviewer reached no verdict, or Reviewers' data couldn't be read in a repo it judges), which wins over 1. Anything but 0 stops the commit (`reviewers help hooks`). `reviewers eval` exits 1 when a case doesn't match. Every other command exits 0, or 1 with the error on stderr. A usage error (an unknown flag, a missing argument) exits 2 and prints the usage, from any command.
 
 ## Commands
 
@@ -485,13 +485,13 @@ Running it again skips any suggestion with the same name as an existing Reviewer
 5. A block stops the commit and prints, for each block, the file, the lines and the fix. A block from an advisory Reviewer (`--advisory`) is printed as a note, and the commit goes through.
 6. **post-commit** ties the landed commit to the review that let it through, so the history shows which commit each review became.
 
-A Reviewer that doesn't answer within 5 minutes, crashes, or answers without a verdict stops the commit too: it fails closed. An advisory one doesn't: it never stops a commit. The 5 minutes can't be changed. To see what went wrong, commit with `REVIEWERS_TRACE_DIR=/tmp/reviewers-trace git commit …`: every session's raw output is kept there, one `.jsonl` file each.
+A Reviewer that doesn't answer within 5 minutes, crashes, or answers without a verdict stops the commit too: it fails closed. An advisory one doesn't: it never stops a commit. If Reviewers' own data can't be read, a repo it judges stops the commit, and every other repo lets it through with a warning: every judged repo carries `reviewers.judged=true` in its git config so the hook can tell without the data. The 5 minutes can't be changed. To see what went wrong, commit with `REVIEWERS_TRACE_DIR=/tmp/reviewers-trace git commit …`: every session's raw output is kept there, one `.jsonl` file each.
 
 ## Exit codes of `commit-msg`
 
 - `0`: every Reviewer approved, only advisory Reviewers blocked or failed, or `REVIEWERS_BYPASS=1` was set.
 - `1`: a Reviewer blocked.
-- `3`: the commit couldn't be reviewed: a blocking Reviewer reached no verdict, or Reviewers' own data couldn't be read. This wins over `1` when both happen in one commit.
+- `3`: the commit couldn't be reviewed: a blocking Reviewer reached no verdict, or Reviewers' own data couldn't be read in a repo it judges. This wins over `1` when both happen in one commit.
 - `2`: not from a review: `reviewers hook` was called wrong (a broken line in another tool's hook), and the usage is printed.
 
 Anything but `0` stops the commit.

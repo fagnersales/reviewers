@@ -79,6 +79,23 @@ pub fn hooks_dir(root: &Path) -> Result<PathBuf, String> {
     Ok(PathBuf::from(common.trim()).join("hooks"))
 }
 
+pub fn local_config(root: &Path, key: &str) -> Option<String> {
+    let output = run(root, &["config", "--local", "--get", key], &[]);
+    let value = output.stdout.trim().to_string();
+    (output.ok && !value.is_empty()).then_some(value)
+}
+
+/// Sets a key in the repo's own config (shared by its worktrees), or unsets it with `None`.
+pub fn set_local_config(root: &Path, key: &str, value: Option<&str>) -> Result<(), String> {
+    match value {
+        Some(value) => ok(root, &["config", "--local", key, value]).map(|_| ()),
+        None => {
+            let output = run(root, &["config", "--local", "--unset", key], &[]);
+            if output.ok || output.stderr.trim().is_empty() { Ok(()) } else { Err(format!("git config --unset {key} failed: {}", output.stderr.trim())) }
+        }
+    }
+}
+
 pub fn global_config(key: &str) -> Option<String> {
     let output = run(&crate::util::home(), &["config", "--global", "--get", key], &[]);
     let value = output.stdout.trim().to_string();

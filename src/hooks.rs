@@ -39,6 +39,30 @@ const EVERY_HOOK: &[&str] = &[
 
 const PREVIOUS_GLOBAL_SETTING: &str = "previous_global_hooks_path";
 
+/// Set in the git config of every repo Reviewers judge, so a commit knows it must be reviewed
+/// even when Reviewers' own data can't be read.
+const JUDGED_KEY: &str = "reviewers.judged";
+
+pub fn mark_judged(root: &Path, judged: bool) -> Result<(), String> {
+    git::set_local_config(root, JUDGED_KEY, judged.then_some("true"))
+}
+
+fn marked_judged(root: &Path) -> bool {
+    git::local_config(root, JUDGED_KEY).as_deref() == Some("true")
+}
+
+/// Reviewers' data couldn't be read. A repo it judges stops the commit; under the global hooks
+/// every other repo lets it through, so one broken file doesn't stop every commit on the machine.
+fn cannot_read(root: &Path, error: &str) -> i32 {
+    if marked_judged(root) {
+        eprintln!("reviewers: {error}\nThe commit is stopped because it could not be reviewed. Skip once with REVIEWERS_BYPASS=1.");
+        EXIT_FAILED
+    } else {
+        eprintln!("reviewers: {error}\nReviewers doesn't judge this repo, so the commit goes through.");
+        EXIT_APPROVED
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum HookState {
     Installed,
@@ -164,6 +188,7 @@ pub enum Coverage {
 /// Makes sure commits here reach Reviewers. The global hooks cover a repo unless it sets its own
 /// hooks folder (`core.hooksPath`, as husky sets), which git prefers; then the hooks go in that folder.
 pub fn cover(root: &Path, take_over_workspace: bool) -> Result<Coverage, String> {
+    mark_judged(root, true)?;
     if git::local_hooks_path(root).is_none() && global_installed() {
         return Ok(Coverage::Global);
     }
@@ -213,6 +238,7 @@ pub fn state_of(root: &Path) -> Result<Vec<(&'static str, Option<HookState>)>, S
 }
 
 pub fn install(root: &Path, take_over_workspace: bool) -> Result<Vec<(&'static str, HookState)>, String> {
+    mark_judged(root, true)?;
     let directory = git::hooks_dir(root)?;
     std::fs::create_dir_all(&directory).map_err(|error| format!("cannot create {}: {error}", directory.display()))?;
     let mut states = Vec::new();
@@ -259,6 +285,7 @@ fn adopt(store: &Store, root: &Path) -> Result<Option<Project>, String> {
     }
     let main = git::main_checkout(root);
     let project = store.ensure_project(&main.display().to_string(), git::remote_url(&main).as_deref())?;
+    mark_judged(&main, true)?;
     eprintln!("reviewers: judging {} from now on; `reviewers ignore` in it turns that off", project.name);
     Ok(Some(project))
 }
@@ -278,10 +305,7 @@ pub fn commit_msg(message_file: Option<&str>) -> i32 {
     };
     let mut store = match Store::open_default() {
         Ok(store) => store,
-        Err(error) => {
-            eprintln!("reviewers: {error}\nThe commit is stopped because it could not be reviewed. Skip once with REVIEWERS_BYPASS=1.");
-            return EXIT_FAILED;
-        }
+        Err(error) => return cannot_read(&root, &error),
     };
     let project = match project_for(&store, &root).and_then(|found| match found {
         Some(project) => Ok(Some(project)),
@@ -289,11 +313,12 @@ pub fn commit_msg(message_file: Option<&str>) -> i32 {
     }) {
         Ok(Some(project)) if !project.ignored => project,
         Ok(_) => return EXIT_APPROVED,
-        Err(error) => {
-            eprintln!("reviewers: {error}");
-            return EXIT_FAILED;
-        }
+        Err(error) => return cannot_read(&root, &error),
     };
+    // Repos judged before the mark existed get it on their next commit.
+    if !marked_judged(&root) {
+        let _ = mark_judged(&root, true);
+    }
     let diff = match git::staged_diff(&root) {
         Ok(diff) => diff,
         Err(error) => {

@@ -101,6 +101,9 @@ pub fn hooks(command: HooksCommand) -> Outcome {
     match command {
         HooksCommand::Install { global: true, .. } => {
             let installed = hooks::install_global(&store)?;
+            for project in store.projects()?.iter().filter(|project| !project.ignored && Path::new(&project.root).exists()) {
+                let _ = hooks::mark_judged(Path::new(&project.root), true);
+            }
             let verb = if installed.updated { "Updated" } else { "Installed" };
             println!("{} {verb} the global hooks {}", ui::green("✓"), ui::dim(&format!("· {}", crate::util::home_path(&hooks::global_dir()))));
             println!("{}", ui::dim("Every repo on this machine now runs Reviewers, and each repo's own hooks still run first."));
@@ -229,6 +232,7 @@ pub fn ignore(path: Option<PathBuf>) -> Outcome {
     let store = Store::open_default()?;
     let project = store.ensure_project(&main.display().to_string(), git::remote_url(&main).as_deref())?;
     store.set_ignored(&project.id, true)?;
+    hooks::mark_judged(&main, false)?;
     println!("Reviewers won't judge {} any more. `reviewers init` here turns them back on.", ui::bold(&project.name));
     Ok(0)
 }
