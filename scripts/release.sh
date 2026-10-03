@@ -15,6 +15,12 @@ if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
   exit 1
 fi
 [ "$#" -gt 0 ] || { echo "give at least one release note" >&2; exit 1; }
+# The site's docs and version come from the binary being released, so they ship with it.
+scripts/site.sh
+if [ -n "$(git status --porcelain site)" ]; then
+  git add site
+  git commit -q -m "Site: docs and version for $version"
+fi
 git push -q origin HEAD
 git tag -a "$tag" -m "$(printf '%s\n' "$@")"
 git push -q origin "$tag"
