@@ -195,7 +195,27 @@ pub enum HookCommand {
     PostCommit,
 }
 
+#[cfg(unix)]
+unsafe extern "C" {
+    fn signal(signum: i32, handler: usize) -> usize;
+}
+
+/// Rust ignores SIGPIPE, so printing into a closed pipe (`reviewers runs --json | head`) panics.
+/// Like any command-line tool, end quietly instead.
+fn exit_quietly_on_closed_pipe() {
+    #[cfg(unix)]
+    {
+        const SIGPIPE: i32 = 13;
+        const SIG_DFL: usize = 0;
+        // SAFETY: restores the default action before any thread starts; nothing else handles SIGPIPE.
+        unsafe {
+            signal(SIGPIPE, SIG_DFL);
+        }
+    }
+}
+
 fn main() {
+    exit_quietly_on_closed_pipe();
     let cli = Cli::parse();
     let code = match cli.command {
         Some(Command::Hook(HookCommand::CommitMsg { message_file })) => hooks::commit_msg(message_file.as_deref()),
