@@ -25,6 +25,8 @@ At most six words, stated as the rule itself: "No type casts", "Errors reach use
 
 The staged diff, its instruction, and its context files. It can open and search any file in the working tree (unstaged edits included), but can't change anything or run commands. In an eval it sees the case's snapshot instead of the repo.
 
+A file `.gitattributes` marks `linguist-generated` (`convex/_generated/** linguist-generated`) shows in the diff as one line, how many lines it added and removed, never its contents. GitHub collapses the same files in pull requests. A commit that only changes generated files isn't judged.
+
 ## Versions
 
 A new instruction is a new version (`reviewers edit <name> --instruction "…"`). Nothing else makes one: name, paths, model, scope and context files change in place. `reviewers show <name> --json` lists every version that judged something, with its instruction, when it was first used and how many decisions it made (the text output lists the versions when there's more than one; the current instruction is always shown); every eval batch keeps its version too (`reviewers evals <name>`). There's no rollback command: to go back, edit the instruction to the earlier text, which makes a new version.

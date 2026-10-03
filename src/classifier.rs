@@ -17,6 +17,8 @@ pub const DEFAULT_CUTOFF: f64 = 0.15;
 /// Measured against the live model: a call is refused above roughly 32,768 input tokens.
 const MAX_CHANGE_CHARS: usize = 40_000;
 const MAX_QUESTION_CHARS: usize = 16_000;
+/// The calls run at once, but past this many pieces a change costs more to classify than it saves.
+const MAX_CHUNKS: usize = 12;
 /// Reviewers the classifier may clear wait for it, so a slow answer can't hold a commit for long.
 const TIMEOUT: Duration = Duration::from_secs(8);
 const ATTEMPTS: u32 = 2;
@@ -168,29 +170,43 @@ pub struct Scores {
 const BREAKS: &str = "The change breaks the rule.";
 const KEEPS: &str = "The change keeps the rule, or the rule doesn't concern it.";
 
-fn file_sections(diff: &str) -> Vec<&str> {
-    let mut starts: Vec<usize> = diff.match_indices("diff --git ").map(|(index, _)| index).filter(|index| *index == 0 || diff.as_bytes()[index - 1] == b'\n').collect();
-    if starts.first() != Some(&0) {
-        starts.insert(0, 0);
-    }
-    starts.iter().enumerate().map(|(position, start)| &diff[*start..starts.get(position + 1).copied().unwrap_or(diff.len())]).filter(|section| !section.trim().is_empty()).collect()
-}
-
-/// The change in pieces the model takes whole. A file too large to read whole is an error:
-/// the classifier can't clear what it hasn't seen.
+/// The change in pieces the model takes whole, files packed together where they fit.
 fn change_chunks(diff: &str) -> Result<Vec<String>, String> {
     let mut chunks: Vec<String> = Vec::new();
-    for section in file_sections(diff) {
-        if section.len() > MAX_CHANGE_CHARS {
-            let name = section.lines().next().and_then(|line| line.rsplit(" b/").next()).unwrap_or("a file");
-            return Err(format!("{name} changed too much for the classifier to read whole"));
-        }
+    for piece in crate::diff::file_sections(diff).into_iter().flat_map(file_pieces) {
         match chunks.last_mut() {
-            Some(last) if last.len() + section.len() <= MAX_CHANGE_CHARS => last.push_str(section),
-            _ => chunks.push(section.to_string()),
+            Some(last) if last.len() + piece.len() <= MAX_CHANGE_CHARS => last.push_str(&piece),
+            _ => chunks.push(piece),
         }
     }
+    if chunks.len() > MAX_CHUNKS {
+        return Err(format!("the change is too large: over {MAX_CHUNKS} pieces for the classifier to read"));
+    }
     Ok(chunks)
+}
+
+/// A file too large to read whole, cut between lines, each piece under the file's header so the
+/// model knows which file it reads.
+fn file_pieces(section: &str) -> Vec<String> {
+    if section.len() <= MAX_CHANGE_CHARS {
+        return vec![section.to_string()];
+    }
+    let hunks_start = section.match_indices("\n@@").next().map_or(section.len(), |(index, _)| index + 1);
+    let (header, hunks) = section.split_at(hunks_start);
+    let room = MAX_CHANGE_CHARS.saturating_sub(header.len());
+    let mut pieces = Vec::new();
+    let mut current = String::new();
+    for line in hunks.split_inclusive('\n') {
+        if !current.is_empty() && current.len() + line.len() > room {
+            pieces.push(format!("{header}{current}"));
+            current.clear();
+        }
+        current.push_str(line);
+    }
+    if !current.is_empty() || pieces.is_empty() {
+        pieces.push(format!("{header}{current}"));
+    }
+    pieces
 }
 
 fn question_groups<'a, 'b>(questions: &'b [Question<'a>]) -> Vec<&'b [Question<'a>]> {
@@ -389,13 +405,20 @@ mod tests {
     }
 
     #[test]
-    fn splits_a_large_change_by_file_and_refuses_a_file_too_large_to_read() {
-        let file = |name: &str, size: usize| format!("diff --git a/{name} b/{name}\n--- a/{name}\n+++ b/{name}\n@@ -1 +1 @@\n+{}\n", "x".repeat(size));
-        let diff = format!("{}{}{}", file("a.ts", 25_000), file("b.ts", 25_000), file("c.ts", 10_000));
+    fn splits_a_large_change_by_file_and_a_large_file_by_lines() {
+        let file = |name: &str, lines: usize| format!("diff --git a/{name} b/{name}\n--- a/{name}\n+++ b/{name}\n@@ -1 +1 @@\n{}", format!("+{}\n", "x".repeat(99)).repeat(lines));
+        let diff = format!("{}{}{}", file("a.ts", 250), file("b.ts", 250), file("c.ts", 100));
         let chunks = change_chunks(&diff).unwrap();
         assert_eq!(chunks.len(), 2);
         assert!(chunks[0].contains("a.ts") && chunks[1].contains("b.ts") && chunks[1].contains("c.ts"));
-        let problem = change_chunks(&file("huge.ts", 50_000)).unwrap_err();
-        assert!(problem.contains("huge.ts"), "{problem}");
+
+        let huge = file("huge.ts", 1_000);
+        let chunks = change_chunks(&huge).unwrap();
+        assert_eq!(chunks.len(), 3);
+        assert!(chunks.iter().all(|chunk| chunk.len() <= MAX_CHANGE_CHARS && chunk.starts_with("diff --git a/huge.ts b/huge.ts\n--- a/huge.ts\n+++ b/huge.ts\n")));
+        assert_eq!(chunks.iter().map(|chunk| chunk.matches("+xxx").count()).sum::<usize>(), 1_000);
+
+        let problem = change_chunks(&file("enormous.ts", 10_000)).unwrap_err();
+        assert!(problem.contains("too large"), "{problem}");
     }
 }

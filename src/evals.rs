@@ -116,7 +116,7 @@ fn worktree_diff(root: &Path, staged: bool) -> Result<String, String> {
     for file in untracked.split('\0').filter(|file| !file.is_empty()) {
         parts.push(git::run(root, &["diff", "--no-index", "--no-ext-diff", "--", "/dev/null", file], &[]).stdout);
     }
-    Ok(parts.concat())
+    Ok(git::without_generated(root, &parts.concat()))
 }
 
 /// Whether the patch applies to the tree at `sha`, checked against a throwaway index.

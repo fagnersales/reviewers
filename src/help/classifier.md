@@ -4,7 +4,7 @@ Jev is an evaluation model by TypeSafe: it answers closed questions with a proba
 
 A cheap first pass before the reviewer sessions. On each commit, one call to Jev, an evaluation model, asks about every Reviewer at once: does this change break the rule? Jev answers each with a probability. A Reviewer scored under its cutoff is approved without a session (cleared); the others run as usual.
 
-The classifier never blocks a commit: a high score only means the Reviewer runs. When it can't answer (an error, a timeout, a file too large to read whole), every Reviewer runs in full.
+The classifier never blocks a commit: a high score only means the Reviewer runs. A file too large to read whole is read in pieces. When it can't answer (an error, a timeout, a change too large even in pieces), every Reviewer runs in full.
 
 ## Connect
 
