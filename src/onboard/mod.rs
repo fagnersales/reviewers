@@ -1,17 +1,18 @@
 pub mod digest;
+pub mod suggest;
 pub mod transcripts;
 
 use crate::claude::{self, Activity, Request, Tokens};
 use crate::commands::Outcome;
 use crate::commands::onboard::OnboardArgs;
-use crate::store::{ClassifierUse, NewReviewer, Scope, Store};
+use crate::store::{ClassifierUse, NewReviewer, Reviewer, Scope, Store};
 use crate::util::{compact, duration, home_path, plural, slugify, str_field, thousands};
 use crate::{git, hooks, skill, ui};
 use digest::{Job, RepoSummary};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, mpsc};
 use std::time::{Duration, Instant};
@@ -51,10 +52,6 @@ struct Rule {
     #[serde(default)]
     paths: Vec<String>,
     #[serde(default)]
-    lintable: bool,
-    #[serde(default)]
-    lint_rule: String,
-    #[serde(default)]
     evidence: Vec<RuleEvidence>,
 }
 
@@ -81,6 +78,9 @@ struct Planned {
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct Suggestion {
+    /// The ids of the reports it was merged from.
+    #[serde(skip)]
+    sources: Vec<String>,
     name: String,
     everywhere: bool,
     repos: Vec<String>,
@@ -88,8 +88,6 @@ struct Suggestion {
     instruction: String,
     why: String,
     times_seen: u32,
-    lintable: bool,
-    lint_rule: String,
     evidence: Vec<Value>,
 }
 
@@ -105,10 +103,10 @@ fn extract_schema() -> Value {
                     "properties": {
                         "repo": text, "name": text, "instruction": text, "why": text,
                         "timesSeen": { "type": "integer" }, "stated": { "type": "boolean" }, "general": { "type": "boolean" },
-                        "paths": { "type": "array", "items": text }, "lintable": { "type": "boolean" }, "lintRule": text,
+                        "paths": { "type": "array", "items": text },
                         "evidence": { "type": "array", "items": { "type": "object", "properties": { "date": text, "quote": text }, "required": ["date", "quote"] } }
                     },
-                    "required": ["repo", "name", "instruction", "why", "timesSeen", "stated", "general", "paths", "lintable", "lintRule", "evidence"]
+                    "required": ["repo", "name", "instruction", "why", "timesSeen", "stated", "general", "paths", "evidence"]
                 }
             }
         },
@@ -245,8 +243,8 @@ fn agent_row(job: &Job, state: &JobState, frame: &str) -> String {
     }
 }
 
-/// Every agent at once, one row each, redrawn in place. Returns every rule found and the tokens spent.
-fn extract(jobs: &[Job], parallel: usize, model: Option<&str>, live: bool) -> (Vec<Candidate>, Tokens, usize) {
+/// Every agent at once, one row each, redrawn in place. Returns every rule found, the tokens spent, and the jobs that failed.
+fn extract(jobs: &[Job], parallel: usize, model: Option<&str>, live: bool) -> (Vec<Candidate>, Tokens, Vec<usize>) {
     let schema = extract_schema();
     let queue: Mutex<VecDeque<usize>> = Mutex::new((0..jobs.len()).collect());
     let (sender, receiver) = mpsc::channel::<JobEvent>();
@@ -394,21 +392,30 @@ fn extract(jobs: &[Job], parallel: usize, model: Option<&str>, live: bool) -> (V
         }
     });
     let tokens = spent.iter().flatten().fold(Tokens::default(), |total, tokens| total + *tokens);
-    let failed = states.iter().filter(|state| matches!(state, JobState::Failed { .. })).count();
+    let failed = states.iter().enumerate().filter(|(_, state)| matches!(state, JobState::Failed { .. })).map(|(index, _)| index).collect();
     (candidates, tokens, failed)
 }
 
-fn plan_merge(candidates: &[Candidate], directory: &Path, model: Option<&str>, spinner: &ui::Spinner) -> Result<(Vec<Planned>, Tokens), String> {
+/// What the merge needs to recognize a rule that's already checked.
+fn existing_list(reviewers: &[Reviewer]) -> String {
+    if reviewers.is_empty() {
+        return "None yet.".into();
+    }
+    let list: Vec<Value> = reviewers.iter().map(|reviewer| json!({ "name": reviewer.name, "instruction": first_sentence(&reviewer.instruction) })).collect();
+    format!("```json\n{}\n```", serde_json::to_string_pretty(&list).unwrap_or_default())
+}
+
+fn plan_merge(candidates: &[Candidate], existing: &[Reviewer], directory: &Path, model: Option<&str>, spinner: &ui::Spinner) -> Result<(Vec<Planned>, Tokens), String> {
     let reports: Vec<Value> = candidates
         .iter()
         .map(|candidate| {
             json!({
                 "id": candidate.id, "repo": candidate.rule.repo, "name": candidate.rule.name, "instruction": candidate.rule.instruction,
-                "timesSeen": candidate.rule.times_seen, "stated": candidate.rule.stated, "general": candidate.rule.general, "lintable": candidate.rule.lintable,
+                "timesSeen": candidate.rule.times_seen, "stated": candidate.rule.stated, "general": candidate.rule.general,
             })
         })
         .collect();
-    let prompt = fill(MERGE, &[("REPORTS", &serde_json::to_string_pretty(&reports).unwrap_or_default())]);
+    let prompt = fill(MERGE, &[("REPORTS", &serde_json::to_string_pretty(&reports).unwrap_or_default()), ("EXISTING", &existing_list(existing))]);
     let outcome = claude::run(
         &Request {
             prompt: &prompt,
@@ -475,8 +482,9 @@ fn pick_evidence(sources: &[&Candidate]) -> Vec<Value> {
 
 /// The merge only groups. Everything decided by counting is decided here: scope
 /// from how many repos a rule came from, the bar (seen twice, or stated as a
-/// standing rule), the order, and the cap.
-fn assemble(planned: &[Planned], candidates: &[Candidate], max: Option<usize>) -> (Vec<Suggestion>, usize) {
+/// standing rule), the order, and the cap. Also returns the sources of each
+/// rule left under the bar.
+fn assemble(planned: &[Planned], candidates: &[Candidate], max: Option<usize>) -> (Vec<Suggestion>, Vec<Vec<String>>) {
     let mut all: Vec<(Suggestion, bool)> = Vec::new();
     for plan in planned {
         let mut sources: Vec<&Candidate> = Vec::new();
@@ -496,6 +504,7 @@ fn assemble(planned: &[Planned], candidates: &[Candidate], max: Option<usize>) -
         let everywhere = plan.scope == "everywhere" || repos.len() > 1;
         all.push((
             Suggestion {
+                sources: sources.iter().map(|source| source.id.clone()).collect(),
                 name: plan.name.clone(),
                 everywhere,
                 paths: if everywhere { Vec::new() } else { base.rule.paths.clone() },
@@ -503,23 +512,19 @@ fn assemble(planned: &[Planned], candidates: &[Candidate], max: Option<usize>) -
                 instruction: base.rule.instruction.trim().to_string(),
                 why: base.rule.why.clone(),
                 times_seen: sources.iter().map(|source| source.rule.times_seen).sum(),
-                lintable: base.rule.lintable,
-                lint_rule: base.rule.lint_rule.clone(),
                 evidence: pick_evidence(&sources),
             },
             sources.iter().any(|source| source.rule.stated),
         ));
     }
-    let total = all.len();
-    let mut kept: Vec<Suggestion> = all.into_iter().filter(|(suggestion, stated)| suggestion.times_seen >= 2 || *stated).map(|(suggestion, _)| suggestion).collect();
+    let (mut kept, thin): (Vec<(Suggestion, bool)>, Vec<(Suggestion, bool)>) = all.into_iter().partition(|(suggestion, stated)| suggestion.times_seen >= 2 || *stated);
+    let thin: Vec<Vec<String>> = thin.into_iter().map(|(suggestion, _)| suggestion.sources).collect();
+    let mut kept: Vec<Suggestion> = kept.drain(..).map(|(suggestion, _)| suggestion).collect();
     kept.sort_by(|a, b| b.times_seen.cmp(&a.times_seen).then(b.evidence.len().cmp(&a.evidence.len())));
-    let thin = total - kept.len();
-    let (mut rules, lint): (Vec<Suggestion>, Vec<Suggestion>) = kept.into_iter().partition(|suggestion| !suggestion.lintable);
     if let Some(max) = max {
-        rules.truncate(max);
+        kept.truncate(max);
     }
-    rules.extend(lint);
-    (rules, thin)
+    (kept, thin)
 }
 
 fn suggestion_file(suggestion: &Suggestion) -> String {
@@ -529,9 +534,6 @@ fn suggestion_file(suggestion: &Suggestion) -> String {
         lines.push(format!("paths: {}", json!(suggestion.paths)));
     }
     lines.extend(["---".into(), String::new(), suggestion.instruction.clone(), String::new(), "## Why".into(), String::new(), suggestion.why.clone()]);
-    if suggestion.lintable {
-        lines.push(format!("\nA linter could enforce this instead: {}", suggestion.lint_rule));
-    }
     lines.extend([String::new(), "## Evidence".into(), String::new()]);
     for item in &suggestion.evidence {
         lines.push(format!("- {} · {}: {}", str_field(item, "repo").unwrap_or_default(), str_field(item, "date").unwrap_or_default(), str_field(item, "quote").unwrap_or_default()));
@@ -547,9 +549,7 @@ fn write_outputs(directory: &Path, candidates: &[Candidate], planned: &[Planned]
     write("reviewers.json", &suggestions)?;
     let root = directory.join("reviewers");
     for suggestion in suggestions {
-        let group = if suggestion.lintable {
-            "lint".to_string()
-        } else if suggestion.everywhere {
+        let group = if suggestion.everywhere {
             "everywhere".to_string()
         } else {
             suggestion.repos.first().cloned().unwrap_or_else(|| "repo".into())
@@ -580,8 +580,24 @@ fn first_sentence(text: &str) -> String {
     }
 }
 
+/// What a suggestion says and why, as paragraphs: the rule, where it applies, the reason, and the person's words.
+fn details(suggestion: &Suggestion) -> Vec<String> {
+    let mut paragraphs = vec![first_sentence(&suggestion.instruction)];
+    if !suggestion.paths.is_empty() {
+        paragraphs.push(format!("Only in: {}", suggestion.paths.join(", ")));
+    }
+    if !suggestion.why.trim().is_empty() {
+        paragraphs.push(format!("Why: {}", suggestion.why.trim()));
+    }
+    for item in &suggestion.evidence {
+        let source = format!("{} · {}", str_field(item, "repo").unwrap_or_default(), digest::short_date(str_field(item, "date").unwrap_or_default()));
+        paragraphs.push(format!("“{}” ({source})", str_field(item, "quote").unwrap_or_default()));
+    }
+    paragraphs
+}
+
 fn print_suggestions(suggestions: &[Suggestion]) {
-    let (rules, lint): (Vec<&Suggestion>, Vec<&Suggestion>) = suggestions.iter().partition(|suggestion| !suggestion.lintable);
+    let rules: Vec<&Suggestion> = suggestions.iter().collect();
     let width = rules.iter().map(|suggestion| suggestion.name.chars().count()).max().unwrap_or(0).min(42) + 2;
     let detailed = rules.len() <= DETAILED_LIST_LIMIT;
     let row = |suggestion: &Suggestion| {
@@ -612,13 +628,6 @@ fn print_suggestions(suggestions: &[Suggestion]) {
         ui::line(&ui::bold(repo));
         rules.iter().filter(|suggestion| !suggestion.everywhere && suggestion.repos.first().map(String::as_str) == Some(repo)).for_each(|suggestion| row(suggestion));
     }
-    if !lint.is_empty() {
-        ui::line("");
-        ui::line(&format!("{}  {}", ui::bold("Better as lint"), ui::dim("cheaper and instant")));
-        for suggestion in lint {
-            ui::line(&format!("{} {}  {}", ui::yellow("○"), suggestion.name, ui::dim(&suggestion.lint_rule)));
-        }
-    }
 }
 
 fn pick_repos(summaries: &[RepoSummary]) -> Option<Vec<usize>> {
@@ -642,15 +651,50 @@ fn pick_repos(summaries: &[RepoSummary]) -> Option<Vec<usize>> {
                 c = widths.2
             ),
             selected: true,
+            more: Vec::new(),
         })
         .collect();
     ui::multiselect("Which repos should Reviewers learn from?", &rows, "repo", 1)
 }
 
+/// Saves each suggestion as a Reviewer, on or off; a repo's own rule is tied to
+/// that repo, found by name in `roots`. Returns what was saved.
+fn save(store: &Store, picks: &[(&Suggestion, bool)], roots: &HashMap<String, PathBuf>, kind: &str, run_directory: &Path) -> Result<Vec<Reviewer>, String> {
+    let mut saved = Vec::new();
+    for (suggestion, enabled) in picks {
+        let mut project_ids = Vec::new();
+        if !suggestion.everywhere {
+            for repo in &suggestion.repos {
+                if let Some(root) = roots.get(repo) {
+                    let root = git::main_checkout(root);
+                    project_ids.push(store.ensure_project(&root.display().to_string(), git::remote_url(&root).as_deref())?.id);
+                }
+            }
+            if project_ids.is_empty() {
+                continue;
+            }
+        }
+        saved.push(store.create_reviewer(NewReviewer {
+            name: suggestion.name.clone(),
+            instruction: suggestion.instruction.clone(),
+            scope: if suggestion.everywhere { Scope::Everywhere } else { Scope::Projects },
+            project_ids,
+            paths: suggestion.paths.clone(),
+            context_files: Vec::new(),
+            enabled: *enabled,
+            blocking: true,
+            model: None,
+            classifier: ClassifierUse::Default,
+            origin: json!({ "kind": kind, "why": suggestion.why, "timesSeen": suggestion.times_seen, "evidence": suggestion.evidence, "run": run_directory }),
+        })?);
+    }
+    Ok(saved)
+}
+
 /// Saves the suggestions as Reviewers, the strong ones on, and puts the hook where they'll run.
 fn activate(store: &Store, suggestions: &[Suggestion], chosen: &[&RepoSummary], interactive: bool, yes: bool, run_directory: &Path) -> Result<(usize, usize, usize), String> {
     let existing: Vec<String> = store.reviewers()?.iter().map(|reviewer| reviewer.name.to_lowercase()).collect();
-    let fresh: Vec<&Suggestion> = suggestions.iter().filter(|suggestion| !suggestion.lintable && !existing.contains(&suggestion.name.to_lowercase())).collect();
+    let fresh: Vec<&Suggestion> = suggestions.iter().filter(|suggestion| !existing.contains(&suggestion.name.to_lowercase())).collect();
     let picked: Vec<bool> = if interactive && !fresh.is_empty() {
         let rows: Vec<ui::PickRow> = fresh
             .iter()
@@ -659,6 +703,7 @@ fn activate(store: &Store, suggestions: &[Suggestion], chosen: &[&RepoSummary], 
                 label: suggestion.name.clone(),
                 detail: format!("{:>4}  {}", format!("{}×", suggestion.times_seen), if suggestion.everywhere { "everywhere".to_string() } else { suggestion.repos.join(", ") }),
                 selected: rank < STARTING_REVIEWERS,
+                more: details(suggestion),
             })
             .collect();
         match ui::multiselect("Which Reviewers should run on your commits?", &rows, "Reviewer", 0) {
@@ -674,31 +719,9 @@ fn activate(store: &Store, suggestions: &[Suggestion], chosen: &[&RepoSummary], 
         let project = store.ensure_project(&root.display().to_string(), git::remote_url(&root).as_deref())?;
         projects.push((repo.name.clone(), project));
     }
-    let mut on = 0;
-    for (suggestion, enabled) in fresh.iter().zip(&picked) {
-        let project_ids: Vec<String> = if suggestion.everywhere {
-            Vec::new()
-        } else {
-            projects.iter().filter(|(name, _)| suggestion.repos.contains(name)).map(|(_, project)| project.id.clone()).collect()
-        };
-        if !suggestion.everywhere && project_ids.is_empty() {
-            continue;
-        }
-        store.create_reviewer(NewReviewer {
-            name: suggestion.name.clone(),
-            instruction: suggestion.instruction.clone(),
-            scope: if suggestion.everywhere { Scope::Everywhere } else { Scope::Projects },
-            project_ids,
-            paths: suggestion.paths.clone(),
-            context_files: Vec::new(),
-            enabled: *enabled,
-            blocking: true,
-            model: None,
-            classifier: ClassifierUse::Default,
-            origin: json!({ "kind": "onboard", "why": suggestion.why, "timesSeen": suggestion.times_seen, "evidence": suggestion.evidence, "run": run_directory }),
-        })?;
-        on += usize::from(*enabled);
-    }
+    let roots: HashMap<String, PathBuf> = chosen.iter().map(|repo| (repo.name.clone(), repo.root.clone())).collect();
+    let picks: Vec<(&Suggestion, bool)> = fresh.iter().copied().zip(picked.iter().copied()).collect();
+    let on = save(store, &picks, &roots, "onboard", run_directory)?.iter().filter(|reviewer| reviewer.enabled).count();
     let install = if interactive {
         ui::confirm("Run Reviewers on every commit, in every repo? (git's global hooks; each repo's own hooks still run)", true).unwrap_or(false)
     } else {
@@ -728,17 +751,12 @@ fn activate(store: &Store, suggestions: &[Suggestion], chosen: &[&RepoSummary], 
     Ok((on, fresh.len() - on, hooked))
 }
 
-pub fn run(args: OnboardArgs) -> Outcome {
-    let interactive = ui::interactive() && !args.yes;
-    let live = ui::stdout_is_tty();
-    if !claude::is_installed() {
-        return Err("onboarding runs on Claude Code, and `claude` isn't on this machine's PATH".into());
-    }
+/// A dated folder in the data folder for everything one run reads and finds; Ctrl-C stops every agent and points there.
+fn run_directory(kind: &str) -> Result<PathBuf, String> {
     let stamp = crate::util::now_iso()[..16].replace([':', 'T'], "-");
-    let directory = crate::util::data_dir().join("onboard").join(stamp);
+    let directory = crate::util::data_dir().join(kind).join(stamp);
     std::fs::create_dir_all(&directory).map_err(|error| format!("cannot create {}: {error}", directory.display()))?;
     let directory = directory.canonicalize().unwrap_or(directory);
-    let started = Instant::now();
     let stopped_in = directory.clone();
     let _ = ctrlc::set_handler(move || {
         claude::stop_all();
@@ -746,6 +764,17 @@ pub fn run(args: OnboardArgs) -> Outcome {
         println!("\n{}  Stopped. What was read so far is in {}\n", ui::red(ui::STEP_CANCEL), home_path(&stopped_in));
         std::process::exit(130);
     });
+    Ok(directory)
+}
+
+pub fn run(args: OnboardArgs) -> Outcome {
+    let interactive = ui::interactive() && !args.yes;
+    let live = ui::stdout_is_tty();
+    if !claude::is_installed() {
+        return Err("onboarding runs on Claude Code, and `claude` isn't on this machine's PATH".into());
+    }
+    let directory = run_directory("onboard")?;
+    let started = Instant::now();
 
     ui::intro(&format!("{} {}", ui::bold(&format!("{} reviewers", ui::LOGO)), ui::dim("· first run")));
     let spinner = ui::Spinner::start("Reading your agent sessions");
@@ -754,9 +783,10 @@ pub fn run(args: OnboardArgs) -> Outcome {
             spinner.message(&format!("Reading your agent sessions · {} of {}", thousands(done as u64), thousands(total as u64)));
         }
     };
-    let scan = transcripts::scan(args.since, &progress);
+    let scanned_at = chrono::Utc::now();
+    let scan = transcripts::scan(scanned_at - chrono::Duration::days(args.since as i64), &progress);
     spinner.message("Collecting commits");
-    let summaries = digest::summarize(scan.repos, args.since);
+    let summaries = digest::summarize(scan.repos);
     spinner.stop(&format!("Read {} of yours from the last {} days", plural(scan.sessions_read - scan.sessions_skipped, "session"), args.since));
     ui::line(&ui::dim(&format!("{} · {} scripted sessions skipped", plural(summaries.len(), "repo"), thousands(scan.sessions_skipped as u64))));
     if summaries.is_empty() {
@@ -802,20 +832,26 @@ pub fn run(args: OnboardArgs) -> Outcome {
         ui::step(&format!("{} · {}", plural(chosen.len(), "repo"), model.as_deref().map(model_label).unwrap_or_else(|| "your default model".into())));
     }
 
-    let jobs = digest::write_jobs(&directory, &chosen, args.since, args.parallel.max(1))?;
+    let jobs = digest::write_jobs(&directory, &chosen, args.parallel.max(1))?;
     if args.dry_run {
         ui::outro(&format!("Material for {} written to {}", plural(jobs.len(), "agent"), home_path(&directory)));
         return Ok(0);
     }
 
     let (candidates, extract_tokens, failed) = extract(&jobs, args.parallel.max(1), model.as_deref(), live);
+    if failed.is_empty() {
+        // `reviewers suggest` picks up after this, rather than reading the same sessions again.
+        let roots: Vec<&Path> = chosen.iter().map(|repo| repo.root.as_path()).collect();
+        suggest::State::load().read_through(&roots, chosen.len() == summaries.len(), scanned_at).save()?;
+    }
     if candidates.is_empty() {
-        ui::outro(if failed > 0 { "Every agent failed; nothing to merge." } else { "No rules found in these sessions." });
-        return Ok(if failed > 0 { 1 } else { 0 });
+        ui::outro(if failed.is_empty() { "No rules found in these sessions." } else { "Every agent failed; nothing to merge." });
+        return Ok(if failed.is_empty() { 0 } else { 1 });
     }
 
+    let store = Store::open_default()?;
     let spinner = ui::Spinner::start(&format!("Merging {} from {}", plural(candidates.len(), "rule"), plural(jobs.len(), "agent")));
-    let (planned, merge_tokens, merged) = match plan_merge(&candidates, &directory, model.as_deref(), &spinner) {
+    let (planned, merge_tokens, merged) = match plan_merge(&candidates, &store.reviewers()?, &directory, model.as_deref(), &spinner) {
         Ok((planned, tokens)) => (planned, tokens, true),
         Err(error) => {
             spinner.message(&format!("Merge failed ({error}); each rule stands alone"));
@@ -823,8 +859,8 @@ pub fn run(args: OnboardArgs) -> Outcome {
         }
     };
     let (suggestions, thin) = assemble(&planned, &candidates, args.max);
-    let kept = suggestions.iter().filter(|suggestion| !suggestion.lintable).count();
-    let left_out = if thin > 0 { ui::dim(&format!(" · {thin} seen only once left out")) } else { String::new() };
+    let kept = suggestions.len();
+    let left_out = if thin.is_empty() { String::new() } else { ui::dim(&format!(" · {} seen only once left out", thin.len())) };
     if merged {
         spinner.stop(&format!("Merged {} into {}{left_out}", plural(candidates.len(), "rule"), plural(kept, "Reviewer")));
     } else {
@@ -833,7 +869,6 @@ pub fn run(args: OnboardArgs) -> Outcome {
     write_outputs(&directory, &candidates, &planned, &suggestions)?;
     print_suggestions(&suggestions);
 
-    let store = Store::open_default()?;
     let (on, off, hooked) = activate(&store, &suggestions, &chosen, interactive, args.yes, &directory)?;
     let skill_agents = if args.no_skill { 0 } else { skill::install().map(|placements| placements.iter().filter(|placement| placement.state == "linked").count()).unwrap_or(0) };
     let tokens = extract_tokens + merge_tokens;

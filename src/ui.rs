@@ -112,7 +112,9 @@ pub fn fit(text: &str, width: usize) -> String {
         let character = text[index..].chars().next().unwrap_or(' ');
         if count + 1 >= width {
             out.push('…');
-            out.push_str("\x1b[0m");
+            if colors() {
+                out.push_str("\x1b[0m");
+            }
             return out;
         }
         out.push(character);
@@ -140,6 +142,33 @@ pub fn line(text: &str) {
         println!("{}", bar());
     } else {
         println!("{}", fit(&format!("{}  {text}", bar()), columns().saturating_sub(1)));
+    }
+}
+
+/// Plain text broken into lines of at most `width` characters, at spaces.
+fn wrap(text: &str, width: usize) -> Vec<String> {
+    let mut lines = Vec::new();
+    let mut current = String::new();
+    for word in text.split_whitespace() {
+        if !current.is_empty() && current.chars().count() + 1 + word.chars().count() > width {
+            lines.push(std::mem::take(&mut current));
+        }
+        if !current.is_empty() {
+            current.push(' ');
+        }
+        current.push_str(word);
+    }
+    if !current.is_empty() {
+        lines.push(current);
+    }
+    lines
+}
+
+/// Prose inside the gutter, wrapped at the width instead of cut.
+pub fn paragraph(text: &str, indent: usize, style: fn(&str) -> String) {
+    let margin = " ".repeat(indent);
+    for wrapped in wrap(text, columns().saturating_sub(4 + indent).max(20)) {
+        line(&format!("{margin}{}", style(&wrapped)));
     }
 }
 
@@ -301,6 +330,8 @@ impl Frame {
 enum Key {
     Up,
     Down,
+    Open,
+    Close,
     Toggle,
     All,
     Invert,
@@ -318,8 +349,10 @@ fn next_key() -> Key {
             continue;
         }
         return match code {
-            KeyCode::Up | KeyCode::Char('k') | KeyCode::Left => Key::Up,
-            KeyCode::Down | KeyCode::Char('j') | KeyCode::Right | KeyCode::Tab => Key::Down,
+            KeyCode::Up | KeyCode::Char('k') => Key::Up,
+            KeyCode::Down | KeyCode::Char('j') | KeyCode::Tab => Key::Down,
+            KeyCode::Right | KeyCode::Char('l') => Key::Open,
+            KeyCode::Left | KeyCode::Char('h') => Key::Close,
             KeyCode::Char(' ') => Key::Toggle,
             KeyCode::Char('a') => Key::All,
             KeyCode::Char('i') => Key::Invert,
@@ -335,11 +368,52 @@ pub struct PickRow {
     pub label: String,
     pub detail: String,
     pub selected: bool,
+    /// Paragraphs shown under the row while it's open (→ opens, ← closes); none makes it a plain row.
+    pub more: Vec<String>,
+}
+
+const MORE_INDENT: usize = 4;
+
+/// An open row's paragraphs, wrapped to the width, a blank line between them.
+fn more_lines(row: &PickRow) -> Vec<String> {
+    let width = columns().saturating_sub(4 + MORE_INDENT).max(20);
+    let mut lines = Vec::new();
+    for (index, paragraph) in row.more.iter().enumerate() {
+        if index > 0 {
+            lines.push(String::new());
+        }
+        lines.extend(wrap(paragraph, width));
+    }
+    lines
+}
+
+/// The rows to draw, as many as fit around the cursor, counting the lines of open rows.
+fn window(heights: &[usize], cursor: usize, room: usize) -> (usize, usize) {
+    let (mut start, mut end) = (cursor, cursor + 1);
+    let mut used = heights[cursor];
+    loop {
+        let mut grew = false;
+        if end < heights.len() && used + heights[end] <= room {
+            used += heights[end];
+            end += 1;
+            grew = true;
+        }
+        if start > 0 && used + heights[start - 1] <= room {
+            start -= 1;
+            used += heights[start];
+            grew = true;
+        }
+        if !grew {
+            return (start, end);
+        }
+    }
 }
 
 /// Every row shows its numbers, and the answer collapses to one line ("All 12 repos").
 pub fn multiselect(message: &str, rows: &[PickRow], noun: &str, minimum: usize) -> Option<Vec<usize>> {
     let mut picked: Vec<bool> = rows.iter().map(|row| row.selected).collect();
+    let mut open: Vec<bool> = vec![false; rows.len()];
+    let openable = rows.iter().any(|row| !row.more.is_empty());
     let mut cursor = 0usize;
     let mut error: Option<String> = None;
     let label_width = rows.iter().map(|row| row.label.chars().count()).max().unwrap_or(0).min(44) + 2;
@@ -360,8 +434,22 @@ pub fn multiselect(message: &str, rows: &[PickRow], noun: &str, minimum: usize) 
     let mut frame = Frame { height: 0 };
     loop {
         let edge = if error.is_some() { yellow(BAR) } else { cyan(BAR) };
-        let visible = rows.len().min(terminal_rows().saturating_sub(9).max(5));
-        let start = cursor.saturating_sub(visible / 2).min(rows.len().saturating_sub(visible));
+        let room = terminal_rows().saturating_sub(9).max(5);
+        let details: Vec<Vec<String>> = rows.iter().zip(&open).map(|(row, open)| if *open { more_lines(row) } else { Vec::new() }).collect();
+        // An open row taller than the screen is cut, so the frame never scrolls the terminal.
+        let details: Vec<Vec<String>> = details
+            .into_iter()
+            .map(|mut lines| {
+                if lines.len() + 1 > room {
+                    lines.truncate(room.saturating_sub(2));
+                    lines.push("…".into());
+                }
+                lines
+            })
+            .collect();
+        let heights: Vec<usize> = details.iter().map(|lines| 1 + lines.len()).collect();
+        let (start, end) = window(&heights, cursor, room);
+        let visible = end - start;
         let mut text = format!("{}  {message}\n", cyan(STEP_ACTIVE));
         if start > 0 {
             text.push_str(&format!("{edge}  {}\n", dim(&format!("↑ {start} more"))));
@@ -377,14 +465,24 @@ pub fn multiselect(message: &str, rows: &[PickRow], noun: &str, minimum: usize) 
             };
             let label = pad(&truncate(&row.label, label_width - 2), label_width);
             let label = if active { label } else { dim(&label) };
-            text.push_str(&format!("{edge}  {box_mark} {label}{}\n", dim(&row.detail)));
+            let arrow = match (row.more.is_empty(), open[index]) {
+                (true, _) if openable => "  ".to_string(),
+                (true, _) => String::new(),
+                (false, true) => format!("{} ", cyan("▾")),
+                (false, false) => format!("{} ", dim("▸")),
+            };
+            text.push_str(&format!("{edge}  {arrow}{box_mark} {label}{}\n", dim(&row.detail)));
+            for detail in &details[index] {
+                text.push_str(&format!("{edge}  {}{}\n", " ".repeat(MORE_INDENT), dim(detail)));
+            }
         }
         let below = rows.len().saturating_sub(start + visible);
         if below > 0 {
             text.push_str(&format!("{edge}  {}\n", dim(&format!("↓ {below} more"))));
         }
         let count = picked.iter().filter(|on| **on).count();
-        text.push_str(&format!("{edge}\n{edge}  {}\n", dim(&format!("{count} of {} · ↑/↓ move · space toggle · a all · enter confirm", rows.len()))));
+        let keys = if openable { "↑/↓ move · →/← open/close · space toggle · a all · enter confirm" } else { "↑/↓ move · space toggle · a all · enter confirm" };
+        text.push_str(&format!("{edge}\n{edge}  {}\n", dim(&format!("{count} of {} · {keys}", rows.len()))));
         if let Some(message) = &error {
             text.push_str(&format!("{}  {}\n", yellow(BAR), yellow(message)));
         }
@@ -393,6 +491,8 @@ pub fn multiselect(message: &str, rows: &[PickRow], noun: &str, minimum: usize) 
         match next_key() {
             Key::Up => cursor = if cursor == 0 { rows.len() - 1 } else { cursor - 1 },
             Key::Down => cursor = (cursor + 1) % rows.len(),
+            Key::Open => open[cursor] = !rows[cursor].more.is_empty(),
+            Key::Close => open[cursor] = false,
             Key::Toggle => picked[cursor] = !picked[cursor],
             Key::All => {
                 let all = picked.iter().all(|on| *on);
@@ -443,8 +543,8 @@ pub fn select(message: &str, choices: &[Choice], initial: usize) -> Option<usize
         text.push_str(&format!("{}  {}\n{}", cyan(BAR), dim("↑/↓ move · enter confirm"), cyan(BAR_END)));
         frame.draw(&text);
         match next_key() {
-            Key::Up => cursor = if cursor == 0 { choices.len() - 1 } else { cursor - 1 },
-            Key::Down => cursor = (cursor + 1) % choices.len(),
+            Key::Up | Key::Close => cursor = if cursor == 0 { choices.len() - 1 } else { cursor - 1 },
+            Key::Down | Key::Open => cursor = (cursor + 1) % choices.len(),
             Key::Enter => {
                 frame.draw(&format!("{}  {message}\n{}  {}", green(STEP_DONE), bar(), dim(&choices[cursor].label)));
                 print!("\r\n");

@@ -7,7 +7,11 @@ Your answer is a grouping, not a rewrite. For each Reviewer, give:
 - `name`: at most six words, stated as the rule itself. No em-dashes, no subtitles. Keep a source's name when it's good.
 - `scope`: `everywhere` when the reports mark it `general` or it came from two or more repos; otherwise `project`.
 
-Every report belongs to exactly one Reviewer. Leave out a report only when it isn't a rule about code at all: a task, a bug report, or how the agent should talk.
+Every report belongs to exactly one Reviewer. Leave out a report only when it isn't a rule about code at all (a task, a bug report, or how the agent should talk), or when it's the same rule as a Reviewer they already have, even in other words.
+
+## Reviewers they already have
+
+{{EXISTING}}
 
 ## Reports
 

@@ -41,6 +41,8 @@ pub struct Output {
 pub enum Command {
     /// Read your agent sessions and turn the rules you keep repeating into Reviewers.
     Onboard(commands::onboard::OnboardArgs),
+    /// Read only the sessions since the last read and suggest new Reviewers, each with why and the words behind it.
+    Suggest(commands::suggest::SuggestArgs),
     /// This repo: the Reviewers that judge it and its latest reviews.
     Status(Output),
     /// List Reviewers: this repo's, or every one with --all.

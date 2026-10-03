@@ -31,6 +31,8 @@ const RULE_FILES: [&str; 12] = [
 pub struct RepoSummary {
     pub name: String,
     pub root: PathBuf,
+    /// Where reading started, as an ISO timestamp.
+    pub since: String,
     pub messages: Vec<HumanMessage>,
     /// Messages that look like corrections; only shown in the picker, agents read everything.
     pub corrections: usize,
@@ -101,14 +103,14 @@ fn rule_files(root: &Path) -> Vec<String> {
 }
 
 /// `abc1234 2026-09-02 subject`, newest first.
-fn commit_log(root: &Path, since_days: u32) -> Vec<String> {
-    let since = format!("--since={since_days} days ago");
+fn commit_log(root: &Path, since: &str) -> Vec<String> {
+    let since = format!("--since={since}");
     let output = git::run(root, &["log", &since, "--no-merges", "--date=short", "--format=%h %ad %s"], &[]);
     if output.ok { output.stdout.lines().map(str::to_string).collect() } else { Vec::new() }
 }
 
 /// Two repos can share a folder name (`a/web`, `b/web`); the parent breaks the tie.
-pub fn summarize(repos: Vec<RepoTranscripts>, since_days: u32) -> Vec<RepoSummary> {
+pub fn summarize(repos: Vec<RepoTranscripts>) -> Vec<RepoSummary> {
     let mut counts: HashMap<String, usize> = HashMap::new();
     for repo in &repos {
         *counts.entry(repo.name.clone()).or_insert(0) += 1;
@@ -124,10 +126,11 @@ pub fn summarize(repos: Vec<RepoTranscripts>, since_days: u32) -> Vec<RepoSummar
             };
             RepoSummary {
                 corrections: repo.messages.iter().filter(|message| is_correction(message)).count(),
-                commits: commit_log(&repo.root, since_days),
+                commits: commit_log(&repo.root, &repo.since),
                 rule_files: rule_files(&repo.root),
                 name,
                 root: repo.root,
+                since: repo.since,
                 messages: repo.messages,
             }
         })
@@ -139,7 +142,7 @@ fn message_bytes(messages: &[HumanMessage]) -> usize {
 }
 
 /// Cuts a repo into stretches of time that each fit one agent.
-fn stretches_of(repo: &RepoSummary, since_date: &str, share: usize) -> Vec<Stretch> {
+fn stretches_of(repo: &RepoSummary, share: usize) -> Vec<Stretch> {
     let total = message_bytes(&repo.messages);
     let parts = total.div_ceil(share).max(1);
     let target = total as f64 / parts as f64;
@@ -156,7 +159,7 @@ fn stretches_of(repo: &RepoSummary, since_date: &str, share: usize) -> Vec<Stret
     let count = cuts.len();
     (0..count)
         .map(|index| {
-            let from = if index == 0 { since_date.to_string() } else { cuts[index].first().map(|message| message.at[..10].to_string()).unwrap_or_default() };
+            let from = if index == 0 { repo.since[..10].to_string() } else { cuts[index].first().map(|message| message.at[..10].to_string()).unwrap_or_default() };
             let next = cuts.get(index + 1).and_then(|cut| cut.first()).map(|message| message.at[..10].to_string());
             let commits = repo
                 .commits
@@ -210,11 +213,10 @@ fn render_messages(messages: &[HumanMessage]) -> String {
 /// First-fit decreasing: big stretches each take an agent and small repos
 /// share one. Bins never pack perfectly, so the share grows until the run is
 /// a single wave; a second wave would double the wait.
-pub fn write_jobs(directory: &Path, repos: &[&RepoSummary], since_days: u32, agents: usize) -> Result<Vec<Job>, String> {
-    let since_date = crate::util::to_iso(chrono::Utc::now() - chrono::Duration::days(since_days as i64))[..10].to_string();
+pub fn write_jobs(directory: &Path, repos: &[&RepoSummary], agents: usize) -> Result<Vec<Job>, String> {
     let total: usize = repos.iter().map(|repo| message_bytes(&repo.messages)).sum();
     let mut share = total.div_ceil(agents.max(1)).clamp(MIN_SHARE_BYTES, MAX_SHARE_BYTES);
-    let stretches = |share: usize| repos.iter().flat_map(|repo| stretches_of(repo, &since_date, share)).collect::<Vec<_>>();
+    let stretches = |share: usize| repos.iter().flat_map(|repo| stretches_of(repo, share)).collect::<Vec<_>>();
     let mut bins = pack(stretches(share), share);
     while bins.len() > agents && share < MAX_SHARE_BYTES {
         share = ((share as f64 * 1.1).ceil() as usize).min(MAX_SHARE_BYTES);

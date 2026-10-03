@@ -4,8 +4,16 @@
 
 The person picks the repos and the model (the default is the one they used most lately). Then agents read the material in parallel, one share each: a big repo is cut into stretches of time, and small repos share an agent. Each agent reports the rules it finds with evidence: the person's own words, with dates. A final step merges the same rule said in different repos, and decides which rules are personal (`everywhere`) and which belong to one repo.
 
-A rule must have come up at least twice, or have been stated as a standing rule ("always", "never"). Rules a linter could enforce are listed apart.
+A rule must have come up at least twice, or have been stated as a standing rule ("always", "never"). Rules a linter could enforce are left out: a lint rule is instant and costs no tokens.
 
 At the end the person picks which Reviewers start on, and the global hooks are installed so every repo runs them, with each repo's own hooks still running first. Everything found, and every piece of evidence, is kept in `onboard/<date>/` in the data folder (`~/.reviewers`, or `REVIEWERS_HOME`).
 
-Running it again skips any suggestion with the same name as an existing Reviewer, ignoring case. The check is by name only, so the same rule under another name would be suggested again. `--since`, `--repos` and `--model` narrow it; `reviewers onboard --help` lists the rest.
+The merge is shown the Reviewers that already exist and leaves out a rule one of them already checks, even in other words; a suggestion with the same name as an existing Reviewer, ignoring case, is skipped too. `--since`, `--repos` and `--model` narrow it; `reviewers onboard --help` lists the rest.
+
+## Later: `reviewers suggest`
+
+`reviewers suggest` does the same over only what was typed since the last read, by onboarding or by an earlier `suggest`, and shows each new Reviewer with why it's suggested and the person's words behind it. Then the person picks which to add; the ones they add start on.
+
+How far each repo has been read is kept in `suggest/state.json` in the data folder, so a session is never sent to an agent twice. A repo whose agent failed is read again next time. `--reread` reads the whole window again, and `--since` caps how far back reading goes (90 days).
+
+A rule seen only once waits in the same file and is suggested once it comes up again, in any later run, within the window. Suggestions the person didn't pick are dropped; suggestions nobody was asked about (no terminal, or the picker cancelled) wait too. `--yes` adds every suggestion without asking.

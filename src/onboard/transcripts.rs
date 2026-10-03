@@ -1,4 +1,5 @@
 use crate::git;
+use chrono::{DateTime, Utc};
 use crate::util::{home, str_field};
 use rayon::prelude::*;
 use regex::Regex;
@@ -43,7 +44,8 @@ pub struct HumanMessage {
 pub struct RepoTranscripts {
     pub root: PathBuf,
     pub name: String,
-    pub sessions: usize,
+    /// Where reading started for this repo, as an ISO timestamp; commits are read from here too.
+    pub since: String,
     pub messages: Vec<HumanMessage>,
 }
 
@@ -275,10 +277,10 @@ impl RepoResolver {
     }
 }
 
-pub fn scan(since_days: u32, on_progress: &(dyn Fn(usize, usize) + Sync)) -> Scan {
-    let since_time = SystemTime::now() - std::time::Duration::from_secs(since_days as u64 * 86_400);
-    let since_iso = crate::util::to_iso(chrono::Utc::now() - chrono::Duration::days(since_days as i64));
-    let files = session_files(since_time);
+/// Every message typed from `since` on; a session file last written before it is never opened.
+pub fn scan(since: DateTime<Utc>, on_progress: &(dyn Fn(usize, usize) + Sync)) -> Scan {
+    let since_iso = crate::util::to_iso(since);
+    let files = session_files(SystemTime::from(since));
     let total = files.len();
     let done = AtomicUsize::new(0);
     let reads: Vec<SessionRead> = files
@@ -311,10 +313,9 @@ pub fn scan(since_days: u32, on_progress: &(dyn Fn(usize, usize) + Sync)) -> Sca
         let repo = repos.entry(root.clone()).or_insert_with(|| RepoTranscripts {
             name: root.file_name().map(|name| name.to_string_lossy().to_string()).unwrap_or_default(),
             root: root.clone(),
-            sessions: 0,
+            since: since_iso.clone(),
             messages: Vec::new(),
         });
-        repo.sessions += 1;
         repo.messages.extend(read.messages.iter().cloned());
     }
     let mut repos: Vec<RepoTranscripts> = repos.into_values().collect();
