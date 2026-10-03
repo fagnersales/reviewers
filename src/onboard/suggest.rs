@@ -63,14 +63,24 @@ impl State {
     }
 
     /// Where reading starts for any repo: the latest of the window and the last full read.
-    fn start(&self, window: &str) -> String {
+    pub(super) fn start(&self, window: &str) -> String {
         self.everything.as_deref().filter(|everything| *everything > window).unwrap_or(window).to_string()
     }
 
     /// Where reading starts for one repo, which may have been read further on its own.
-    fn start_for(&self, root: &Path, window: &str) -> String {
+    pub(super) fn start_for(&self, root: &Path, window: &str) -> String {
         let start = self.start(window);
         self.repos.get(&root.display().to_string()).filter(|through| **through > start).cloned().unwrap_or(start)
+    }
+
+    pub(super) fn unread(&self, mut repos: Vec<transcripts::RepoTranscripts>, window: &str, reread: bool) -> Vec<transcripts::RepoTranscripts> {
+        for repo in &mut repos {
+            if !reread { repo.since = self.start_for(&repo.root, window); }
+            let since = repo.since.clone();
+            repo.messages.retain(|message| message.at > since);
+        }
+        repos.retain(|repo| !repo.messages.is_empty());
+        repos
     }
 }
 
@@ -95,6 +105,7 @@ pub fn run(args: SuggestArgs) -> Outcome {
         return Err("suggestions come from Claude Code or Codex, and neither `claude` nor `codex` is on this machine's PATH".into());
     }
     let store = Store::open_default()?;
+    let per_project = store.setting("onboard_context")?.as_deref() == Some("project");
     let state = State::load();
     let started = Instant::now();
     let now = Utc::now();
@@ -110,15 +121,7 @@ pub fn run(args: SuggestArgs) -> Outcome {
         }
     };
     let scan = transcripts::scan(parse_iso(&from).unwrap_or(now), &progress);
-    let mut repos = scan.repos;
-    for repo in &mut repos {
-        if !args.reread {
-            repo.since = state.start_for(&repo.root, &window);
-        }
-        let since = repo.since.clone();
-        repo.messages.retain(|message| message.at > since);
-    }
-    repos.retain(|repo| !repo.messages.is_empty());
+    let repos = state.unread(scan.repos, &window, args.reread);
     spinner.message("Collecting commits");
     let summaries = digest::summarize(repos);
     let chosen: Vec<&RepoSummary> = summaries.iter().filter(|repo| wanted.as_ref().is_none_or(|wanted| wanted.contains(&repo.name))).collect();
@@ -150,7 +153,7 @@ pub fn run(args: SuggestArgs) -> Outcome {
     }
     ui::step(&format!("{} · {}", plural(chosen.len(), "repo"), model.as_deref().map(model_label).unwrap_or_else(|| "your default model".into())));
     let directory = run_directory("suggest")?;
-    let jobs = digest::write_jobs(&directory, &chosen, args.parallel.max(1))?;
+    let jobs = digest::write_jobs(&directory, &chosen, args.parallel.max(1), per_project)?;
     let (mut candidates, extract_tokens, failed) = extract(&jobs, args.parallel.max(1), model.as_deref(), live);
 
     // Where each report came from, so one that waits can be tied back to its repo.
@@ -186,23 +189,44 @@ pub fn run(args: SuggestArgs) -> Outcome {
         return Ok(if failed.is_empty() { 0 } else { 1 });
     }
 
+    let mut roots: HashMap<String, PathBuf> = chosen.iter().map(|repo| (repo.name.clone(), repo.root.clone())).collect();
+    for (id, (root, _)) in &origins {
+        if let Some(candidate) = candidates.iter().find(|candidate| &candidate.id == id) {
+            roots.entry(candidate.rule.repo.clone()).or_insert_with(|| root.clone());
+        }
+    }
     let existing = store.reviewers()?;
     let earlier = if waiting > 0 { format!(" with {waiting} waiting from earlier") } else { String::new() };
     let spinner = ui::Spinner::start(&format!("Merging {}{earlier}", plural(candidates.len() - waiting, "new rule")));
-    let (planned, merge_tokens) = match plan_merge(&candidates, &existing, &directory, model.as_deref(), &spinner) {
+    let merge = if per_project {
+        plan_by_project(&candidates, &existing, &roots, &store, &directory, model.as_deref(), &spinner)
+    } else {
+        plan_merge(&candidates, &existing, &directory, model.as_deref(), &spinner)
+    };
+    let (planned, merge_tokens) = match merge {
         Ok((planned, tokens)) => {
             spinner.stop("Merged");
             (planned, tokens)
         }
         Err(error) => {
-            spinner.fail(&format!("Couldn't merge ({error}); each rule stands alone"));
+            let logged = log_merge_error(&directory, "all projects", &error);
+            spinner.fail(&format!("Could not merge the reports; each rule stands alone.{}", merge_error_hint(logged)));
             (unmerged(&candidates), Tokens::default())
         }
     };
-    let (suggestions, thin) = assemble(&planned, &candidates, args.max);
+    let (suggestions, thin) = assemble(&planned, &candidates, args.max, per_project);
     write_outputs(&directory, &candidates, &planned, &suggestions)?;
+    let project_ids: HashMap<String, Option<String>> = if per_project {
+        roots.iter().map(|(name, root)| {
+            store.project_by_root(&git::main_checkout(root).display().to_string()).map(|project| (name.clone(), project.map(|project| project.id)))
+        }).collect::<Result<_, _>>()?
+    } else { HashMap::new() };
     let names: HashSet<String> = existing.iter().map(|reviewer| reviewer.name.to_lowercase()).collect();
-    let fresh: Vec<&Suggestion> = suggestions.iter().filter(|suggestion| !names.contains(&suggestion.name.to_lowercase())).collect();
+    let fresh: Vec<&Suggestion> = suggestions.iter().filter(|suggestion| {
+        if !per_project { return !names.contains(&suggestion.name.to_lowercase()); }
+        !existing.iter().any(|reviewer| reviewer.name.eq_ignore_ascii_case(&suggestion.name) &&
+            (reviewer.scope == Scope::Everywhere || suggestion.repos.iter().any(|name| project_ids.get(name).and_then(Option::as_ref).is_some_and(|id| reviewer.project_ids.contains(id)))))
+    }).collect();
 
     let mut waiting_ids: Vec<&String> = thin.iter().flatten().collect();
     if !fresh.is_empty() && !interactive {
@@ -238,12 +262,6 @@ pub fn run(args: SuggestArgs) -> Outcome {
     };
     State { pending: set_aside.into_iter().chain(to_pending(&waiting_ids, &candidates)).collect(), ..state }.save()?;
 
-    let mut roots: HashMap<String, PathBuf> = chosen.iter().map(|repo| (repo.name.clone(), repo.root.clone())).collect();
-    for (id, (root, _)) in &origins {
-        if let Some(candidate) = candidates.iter().find(|candidate| &candidate.id == id) {
-            roots.entry(candidate.rule.repo.clone()).or_insert_with(|| root.clone());
-        }
-    }
     let picks: Vec<(&Suggestion, bool)> = fresh.iter().copied().zip(picked.iter().copied()).filter(|(_, picked)| *picked).map(|(suggestion, _)| (suggestion, true)).collect();
     let added = save(&store, &picks, &roots, "suggest", &directory)?;
 
@@ -291,5 +309,22 @@ mod tests {
         assert_eq!(state.start_for(web, window), "2026-09-15T00:00:00.000Z");
         assert_eq!(state.start_for(api, window), "2026-09-15T00:00:00.000Z");
         assert_eq!(state.start("2026-09-20T00:00:00.000Z"), "2026-09-20T00:00:00.000Z");
+    }
+
+    #[test]
+    fn unread_only_passes_new_messages_to_agents() {
+        let window = "2026-07-01T00:00:00.000Z";
+        let old = "2026-08-01T00:00:00.000Z";
+        let new = "2026-09-02T00:00:00.000Z";
+        let repo = || transcripts::RepoTranscripts {
+            root: PathBuf::from("/code/web"), name: "web".into(), since: window.into(),
+            messages: [old, new].iter().map(|at| transcripts::HumanMessage { at: (*at).into(), text: "rule".into() }).collect(),
+        };
+        let state = State::default().read_through(&[Path::new("/code/web")], false, parse_iso("2026-09-01T00:00:00.000Z").unwrap());
+        let unread = state.unread(vec![repo()], window, false);
+        assert_eq!(unread[0].messages.len(), 1);
+        assert_eq!(unread[0].messages[0].at, new);
+        assert_eq!(unread[0].since, "2026-09-01T00:00:00.000Z");
+        assert_eq!(state.unread(vec![repo()], window, true)[0].messages.len(), 2);
     }
 }

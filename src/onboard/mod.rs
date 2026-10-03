@@ -4,7 +4,7 @@ pub mod transcripts;
 
 use crate::agent::{self, Activity, Provider, Request, Tokens};
 use crate::commands::Outcome;
-use crate::commands::onboard::OnboardArgs;
+use crate::commands::onboard::{ContextScope, OnboardArgs};
 use crate::store::{ClassifierUse, NewReviewer, Reviewer, Scope, Store};
 use crate::util::{compact, duration, home_path, plural, slugify, str_field, thousands};
 use crate::{git, hooks, skill, ui};
@@ -13,6 +13,7 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::{HashMap, VecDeque};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, mpsc};
 use std::time::{Duration, Instant};
@@ -449,6 +450,54 @@ fn plan_merge(candidates: &[Candidate], existing: &[Reviewer], directory: &Path,
     Ok((planned, outcome.tokens))
 }
 
+fn log_merge_error(directory: &Path, scope: &str, error: &str) -> bool {
+    std::fs::OpenOptions::new().create(true).append(true).open(directory.join("merge-errors.log"))
+        .and_then(|mut file| writeln!(file, "{scope}: {error}"))
+        .is_ok()
+}
+
+fn merge_error_hint(logged: bool) -> &'static str {
+    if logged { " See merge-errors.log in the run folder." } else { "" }
+}
+
+fn plan_by_project(candidates: &[Candidate], existing: &[Reviewer], roots: &HashMap<String, PathBuf>, store: &Store, directory: &Path, model: Option<&str>, spinner: &ui::Spinner) -> Result<(Vec<Planned>, Tokens), String> {
+    let mut planned = Vec::new();
+    let mut tokens = Tokens::default();
+    let mut names: Vec<&str> = candidates.iter().map(|candidate| candidate.rule.repo.as_str()).collect();
+    names.sort();
+    names.dedup();
+    for name in names {
+        let reports: Vec<Candidate> = candidates.iter().filter(|candidate| candidate.rule.repo == name).cloned().collect();
+        if reports.is_empty() { continue; }
+        let project_id = match roots.get(name) {
+            Some(root) => store.project_by_root(&git::main_checkout(root).display().to_string())?.map(|project| project.id),
+            None => None,
+        };
+        let relevant: Vec<Reviewer> = existing.iter().filter(|reviewer| reviewer.scope == Scope::Everywhere || project_id.as_ref().is_some_and(|id| reviewer.project_ids.contains(id))).cloned().collect();
+        match plan_merge(&reports, &relevant, directory, model, spinner) {
+            Ok((mut group, used)) => {
+                let ids: Vec<&str> = reports.iter().map(|report| report.id.as_str()).collect();
+                for plan in &mut group {
+                    plan.sources.retain(|source| ids.contains(&source.as_str()));
+                    if !ids.contains(&plan.instruction_from.as_str()) {
+                        plan.instruction_from = plan.sources.first().cloned().unwrap_or_default();
+                    }
+                    plan.scope = "project".into();
+                }
+                group.retain(|plan| !plan.sources.is_empty());
+                planned.append(&mut group);
+                tokens = tokens + used;
+            }
+            Err(error) => {
+                let logged = log_merge_error(directory, name, &error);
+                spinner.message(&format!("Could not merge {name}; its rules stand alone.{}", merge_error_hint(logged)));
+                planned.extend(unmerged(&reports));
+            }
+        }
+    }
+    Ok((planned, tokens))
+}
+
 /// When the merge can't run, every report stands alone rather than the whole run being lost.
 fn unmerged(candidates: &[Candidate]) -> Vec<Planned> {
     candidates
@@ -495,7 +544,7 @@ fn pick_evidence(sources: &[&Candidate]) -> Vec<Value> {
 /// from how many repos a rule came from, the bar (seen twice, or stated as a
 /// standing rule), the order, and the cap. Also returns the sources of each
 /// rule left under the bar.
-fn assemble(planned: &[Planned], candidates: &[Candidate], max: Option<usize>) -> (Vec<Suggestion>, Vec<Vec<String>>) {
+fn assemble(planned: &[Planned], candidates: &[Candidate], max: Option<usize>, per_project: bool) -> (Vec<Suggestion>, Vec<Vec<String>>) {
     let mut all: Vec<(Suggestion, bool)> = Vec::new();
     for plan in planned {
         let mut sources: Vec<&Candidate> = Vec::new();
@@ -512,7 +561,7 @@ fn assemble(planned: &[Planned], candidates: &[Candidate], max: Option<usize>) -
         let mut repos: Vec<String> = sources.iter().map(|source| source.rule.repo.clone()).collect();
         repos.sort();
         repos.dedup();
-        let everywhere = plan.scope == "everywhere" || repos.len() > 1;
+        let everywhere = !per_project && (plan.scope == "everywhere" || repos.len() > 1);
         all.push((
             Suggestion {
                 sources: sources.iter().map(|source| source.id.clone()).collect(),
@@ -704,8 +753,19 @@ fn save(store: &Store, picks: &[(&Suggestion, bool)], roots: &HashMap<String, Pa
 
 /// Saves the suggestions as Reviewers, the strong ones on, and puts the hook where they'll run.
 fn activate(store: &Store, suggestions: &[Suggestion], chosen: &[&RepoSummary], interactive: bool, yes: bool, run_directory: &Path) -> Result<(usize, usize, usize), String> {
-    let existing: Vec<String> = store.reviewers()?.iter().map(|reviewer| reviewer.name.to_lowercase()).collect();
-    let fresh: Vec<&Suggestion> = suggestions.iter().filter(|suggestion| !existing.contains(&suggestion.name.to_lowercase())).collect();
+    let project_ids: Vec<(String, Option<String>)> = chosen.iter().map(|repo| {
+        let root = git::main_checkout(&repo.root);
+        store.project_by_root(&root.display().to_string()).map(|project| (repo.name.clone(), project.map(|project| project.id)))
+    }).collect::<Result<_, _>>()?;
+    let existing = store.reviewers()?;
+    let fresh: Vec<&Suggestion> = suggestions.iter().filter(|suggestion| {
+        !existing.iter().any(|reviewer| {
+            reviewer.name.eq_ignore_ascii_case(&suggestion.name) &&
+                (reviewer.scope == Scope::Everywhere || suggestion.everywhere || suggestion.repos.iter().any(|name| {
+                    project_ids.iter().any(|(project_name, project_id)| project_name == name && project_id.as_ref().is_some_and(|id| reviewer.project_ids.contains(id)))
+                }))
+        })
+    }).collect();
     let picked: Vec<bool> = if interactive && !fresh.is_empty() {
         let rows: Vec<ui::PickRow> = fresh
             .iter()
@@ -783,6 +843,7 @@ pub fn run(args: OnboardArgs) -> Outcome {
     let live = ui::stdout_is_tty();
     let directory = run_directory("onboard")?;
     let started = Instant::now();
+    let state = suggest::State::load();
 
     ui::intro(&format!("{} {}", ui::bold(&format!("{} reviewers", ui::LOGO)), ui::dim("· first run")));
     let spinner = ui::Spinner::start("Reading your agent sessions");
@@ -792,13 +853,16 @@ pub fn run(args: OnboardArgs) -> Outcome {
         }
     };
     let scanned_at = chrono::Utc::now();
-    let scan = transcripts::scan(scanned_at - chrono::Duration::days(args.since as i64), &progress);
+    let window = crate::util::to_iso(scanned_at - chrono::Duration::days(args.since as i64));
+    let from = if args.reread { window.clone() } else { state.start(&window) };
+    let scan = transcripts::scan(crate::util::parse_iso(&from).unwrap_or(scanned_at), &progress);
     spinner.message("Collecting commits");
-    let summaries = digest::summarize(scan.repos);
+    let repos = state.unread(scan.repos, &window, args.reread);
+    let summaries = digest::summarize(repos);
     spinner.stop(&format!("Read {} of yours from the last {} days", plural(scan.sessions_read - scan.sessions_skipped, "session"), args.since));
     ui::line(&ui::dim(&format!("{} · {} scripted sessions skipped", plural(summaries.len(), "repo"), thousands(scan.sessions_skipped as u64))));
     if summaries.is_empty() {
-        ui::outro("No repos found in your agent sessions.");
+        ui::outro("No new sessions to read. Use --reread to read the window again.");
         return Ok(0);
     }
 
@@ -821,6 +885,22 @@ pub fn run(args: OnboardArgs) -> Outcome {
         return Ok(0);
     }
 
+    let context = match args.context {
+        Some(context) => context,
+        None if interactive => {
+            let choices = [
+                ui::Choice { label: "All selected projects".into(), hint: "Pool evidence to find rules that apply everywhere".into() },
+                ui::Choice { label: "Each project separately".into(), hint: "Keep evidence and suggested Reviewers within each project".into() },
+            ];
+            match ui::select("How should Reviewers use project context?", &choices, 0) {
+                Some(0) => ContextScope::All,
+                Some(_) => ContextScope::Project,
+                None => { ui::cancelled("Nothing was sent to an agent."); return Ok(130); }
+            }
+        }
+        None => ContextScope::All,
+    };
+
     let claude_installed = agent::is_installed(Provider::Claude);
     let codex_installed = agent::is_installed(Provider::Codex);
     let choices = model_choices(&scan.models, claude_installed || args.dry_run, codex_installed || args.dry_run);
@@ -842,7 +922,7 @@ pub fn run(args: OnboardArgs) -> Outcome {
         ui::step(&format!("{} · {}", plural(chosen.len(), "repo"), model.as_deref().map(model_label).unwrap_or_else(|| "your default model".into())));
     }
 
-    let jobs = digest::write_jobs(&directory, &chosen, args.parallel.max(1))?;
+    let jobs = digest::write_jobs(&directory, &chosen, args.parallel.max(1), context == ContextScope::Project)?;
     if args.dry_run {
         ui::outro(&format!("Material for {} written to {}", plural(jobs.len(), "agent"), home_path(&directory)));
         return Ok(0);
@@ -852,28 +932,35 @@ pub fn run(args: OnboardArgs) -> Outcome {
         let cli = match provider { Provider::Claude => "claude", Provider::Codex => "codex" };
         return Err(format!("onboarding needs `{cli}` on PATH for this model; install it and sign in, or choose another --model"));
     }
+    let store = Store::open_default()?;
+    store.set_setting("onboard_context", Some(if context == ContextScope::Project { "project" } else { "all" }))?;
 
     let (candidates, extract_tokens, failed) = extract(&jobs, args.parallel.max(1), model.as_deref(), live);
-    if failed.is_empty() {
-        // `reviewers suggest` picks up after this, rather than reading the same sessions again.
-        let roots: Vec<&Path> = chosen.iter().map(|repo| repo.root.as_path()).collect();
-        suggest::State::load().read_through(&roots, chosen.len() == summaries.len(), scanned_at).save()?;
-    }
+    let failed_roots: Vec<&Path> = failed.iter().flat_map(|&index| jobs[index].stretches.iter().map(|stretch| stretch.root.as_path())).collect();
+    let read_roots: Vec<&Path> = chosen.iter().map(|repo| repo.root.as_path()).filter(|root| !failed_roots.contains(root)).collect();
+    state.read_through(&read_roots, args.repos.is_none() && chosen.len() == summaries.len() && failed.is_empty(), scanned_at).save()?;
     if candidates.is_empty() {
         ui::outro(if failed.is_empty() { "No rules found in these sessions." } else { "Every agent failed; nothing to merge." });
         return Ok(if failed.is_empty() { 0 } else { 1 });
     }
 
-    let store = Store::open_default()?;
     let spinner = ui::Spinner::start(&format!("Merging {} from {}", plural(candidates.len(), "rule"), plural(jobs.len(), "agent")));
-    let (planned, merge_tokens, merged) = match plan_merge(&candidates, &store.reviewers()?, &directory, model.as_deref(), &spinner) {
+    let existing = store.reviewers()?;
+    let roots: HashMap<String, PathBuf> = chosen.iter().map(|repo| (repo.name.clone(), repo.root.clone())).collect();
+    let merge = if context == ContextScope::Project {
+        plan_by_project(&candidates, &existing, &roots, &store, &directory, model.as_deref(), &spinner)
+    } else {
+        plan_merge(&candidates, &existing, &directory, model.as_deref(), &spinner)
+    };
+    let (planned, merge_tokens, merged) = match merge {
         Ok((planned, tokens)) => (planned, tokens, true),
         Err(error) => {
-            spinner.message(&format!("Merge failed ({error}); each rule stands alone"));
+            let logged = log_merge_error(&directory, "all projects", &error);
+            spinner.message(&format!("Could not merge the reports; each rule stands alone.{}", merge_error_hint(logged)));
             (unmerged(&candidates), Tokens::default(), false)
         }
     };
-    let (suggestions, thin) = assemble(&planned, &candidates, args.max);
+    let (suggestions, thin) = assemble(&planned, &candidates, args.max, context == ContextScope::Project);
     let kept = suggestions.len();
     let left_out = if thin.is_empty() { String::new() } else { ui::dim(&format!(" · {} seen only once left out", thin.len())) };
     if merged {
@@ -963,5 +1050,18 @@ mod tests {
         assert_eq!(codex.iter().map(|(id, _)| id.as_str()).collect::<Vec<_>>(), ["codex:test-model", "codex"]);
         assert!(model_choices(&usage, true, false).iter().all(|(id, _)| !id.starts_with("codex")));
         assert!(model_choices(&usage, false, false).is_empty());
+    }
+
+    #[test]
+    fn project_context_never_creates_everywhere_reviewers() {
+        let candidates = vec![Candidate { id: "r1".into(), rule: Rule {
+            repo: "api".into(), name: "Keep errors clear".into(), instruction: "Block unclear errors.".into(),
+            why: String::new(), times_seen: 2, stated: true, general: true, paths: Vec::new(), evidence: Vec::new(),
+        } }];
+        let planned = vec![Planned { name: "Keep errors clear".into(), scope: "everywhere".into(), sources: vec!["r1".into()], instruction_from: "r1".into() }];
+        assert!(assemble(&planned, &candidates, None, false).0[0].everywhere);
+        let separate = assemble(&planned, &candidates, None, true).0;
+        assert!(!separate[0].everywhere);
+        assert_eq!(separate[0].repos, vec!["api".to_string()]);
     }
 }
