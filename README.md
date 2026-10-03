@@ -23,7 +23,7 @@ reviewers model 'codex:<model-id>' --repo # optional: choose a specific model fo
 reviewers edit <reviewer> --model sonnet  # individual Reviewers can still use Claude
 ```
 
-Onboarding discovers Codex JSONL rollouts in `~/.codex/{sessions,archived_sessions}` and `$CODEX_HOME`, alongside Claude transcripts. Its selected model becomes the review default if none is configured. Transcript source and reviewer model are independent. Existing unqualified model settings still use Claude; `codex` uses Codex's built-in default and `codex:<model-id>` selects a model explicitly.
+Onboarding discovers Codex JSONL rollouts in `~/.codex/{sessions,archived_sessions}` and `$CODEX_HOME`, alongside Claude transcripts. A Codex model chosen there becomes the review default if none is configured. Transcript source and reviewer model are independent. Existing unqualified model settings still use Claude; `codex` uses Codex's built-in default and `codex:<model-id>` selects a model explicitly.
 
 Codex runs in a read-only sandbox with approvals, hooks and web search disabled. It uses saved CLI authentication, but ignores user configuration and execution rules to isolate reviews from personal tools and permission overrides; select custom models explicitly. Claude keeps its Read/Grep/Glob tool allowlist.
 

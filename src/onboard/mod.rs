@@ -850,9 +850,9 @@ pub fn run(args: OnboardArgs) -> Outcome {
 
     let store = Store::open_default()?;
     let (on, off, hooked) = activate(&store, &suggestions, &chosen, interactive, args.yes, &directory)?;
-    // New Reviewers inherit this setting. A Codex-only installation must not
-    // silently switch to Claude when its first commit is reviewed.
-    if store.setting("default_model")?.is_none() {
+    // A Codex-only installation must not silently switch to Claude when its
+    // first commit is reviewed. A Claude pick only chose who reads transcripts.
+    if provider == Provider::Codex && store.setting("default_model")?.is_none() {
         store.set_setting("default_model", model.as_deref())?;
     }
     let skill_agents = if args.no_skill { 0 } else { skill::install().map(|placements| placements.iter().filter(|placement| placement.state == "linked").count()).unwrap_or(0) };
