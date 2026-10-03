@@ -6,7 +6,6 @@ mod evals;
 mod git;
 mod help;
 mod hooks;
-mod import;
 mod onboard;
 mod review;
 mod scope;
@@ -165,8 +164,6 @@ pub enum Command {
         #[arg(long)]
         repo: bool,
     },
-    /// Bring over Reviewers, history and evals from Personal Workspace.
-    Import(import::ImportArgs),
     /// The classifier: a cheap first pass that skips Reviewers a change can't concern. With no subcommand, the same as `status`.
     Classifier {
         #[command(subcommand)]

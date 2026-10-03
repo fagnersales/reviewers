@@ -6,7 +6,6 @@ use std::time::Instant;
 
 const MARKER: &str = "# managed by reviewers";
 /// The hooks the TypeScript workspace installed; `reviewers import --hooks` takes them over.
-const WORKSPACE_MARKER: &str = "# Personal Workspace hook";
 
 pub const HOOKS: [&str; 2] = ["commit-msg", "post-commit"];
 
@@ -67,11 +66,8 @@ fn cannot_read(root: &Path, error: &str) -> i32 {
 pub enum HookState {
     Installed,
     Updated,
-    TookOver,
     /// Another tool's hook is there; it was left alone.
     Foreign,
-    /// The old Personal Workspace hook is there; left alone unless taking over.
-    Workspace,
 }
 
 fn binary_path() -> String {
@@ -187,12 +183,12 @@ pub enum Coverage {
 
 /// Makes sure commits here reach Reviewers. The global hooks cover a repo unless it sets its own
 /// hooks folder (`core.hooksPath`, as husky sets), which git prefers; then the hooks go in that folder.
-pub fn cover(root: &Path, take_over_workspace: bool) -> Result<Coverage, String> {
+pub fn cover(root: &Path) -> Result<Coverage, String> {
     mark_judged(root, true)?;
     if git::local_hooks_path(root).is_none() && global_installed() {
         return Ok(Coverage::Global);
     }
-    install(root, take_over_workspace).map(Coverage::Repo)
+    install(root).map(Coverage::Repo)
 }
 
 /// Whether a commit here runs Reviewers.
@@ -224,20 +220,14 @@ pub fn state_of(root: &Path) -> Result<Vec<(&'static str, Option<HookState>)>, S
         .map(|hook| {
             let content = std::fs::read_to_string(directory.join(hook)).ok();
             let state = content.map(|content| {
-                if content.contains(MARKER) {
-                    HookState::Installed
-                } else if content.contains(WORKSPACE_MARKER) {
-                    HookState::Workspace
-                } else {
-                    HookState::Foreign
-                }
+                if content.contains(MARKER) { HookState::Installed } else { HookState::Foreign }
             });
             (*hook, state)
         })
         .collect())
 }
 
-pub fn install(root: &Path, take_over_workspace: bool) -> Result<Vec<(&'static str, HookState)>, String> {
+pub fn install(root: &Path) -> Result<Vec<(&'static str, HookState)>, String> {
     mark_judged(root, true)?;
     let directory = git::hooks_dir(root)?;
     std::fs::create_dir_all(&directory).map_err(|error| format!("cannot create {}: {error}", directory.display()))?;
@@ -248,11 +238,9 @@ pub fn install(root: &Path, take_over_workspace: bool) -> Result<Vec<(&'static s
         let state = match &existing {
             None => HookState::Installed,
             Some(content) if content.contains(MARKER) => HookState::Updated,
-            Some(content) if content.contains(WORKSPACE_MARKER) && take_over_workspace => HookState::TookOver,
-            Some(content) if content.contains(WORKSPACE_MARKER) => HookState::Workspace,
             Some(_) => HookState::Foreign,
         };
-        if matches!(state, HookState::Installed | HookState::Updated | HookState::TookOver) {
+        if matches!(state, HookState::Installed | HookState::Updated) {
             write_executable(&path, &script(hook))?;
         }
         states.push((hook, state));
@@ -413,8 +401,6 @@ pub fn describe(state: HookState) -> &'static str {
     match state {
         HookState::Installed => "installed",
         HookState::Updated => "up to date",
-        HookState::TookOver => "took over from Personal Workspace",
         HookState::Foreign => "left alone: another tool's hook is there",
-        HookState::Workspace => "left alone: Personal Workspace's hook is there",
     }
 }

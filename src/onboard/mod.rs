@@ -711,13 +711,13 @@ fn activate(store: &Store, suggestions: &[Suggestion], chosen: &[&RepoSummary], 
             ui::line(&format!("{} {}", ui::red("✗"), ui::dim(&format!("global hooks: {error}"))));
         }
         for (name, project) in &projects {
-            match hooks::cover(Path::new(&project.root), false) {
+            match hooks::cover(Path::new(&project.root)) {
                 Ok(hooks::Coverage::Global) => hooked += 1,
                 Ok(hooks::Coverage::Repo(states)) => {
                     let ours = states.iter().all(|(_, state)| matches!(state, hooks::HookState::Installed | hooks::HookState::Updated));
                     hooked += usize::from(ours);
                     if !ours {
-                        let reason = states.iter().find(|(_, state)| matches!(state, hooks::HookState::Foreign | hooks::HookState::Workspace)).map(|(_, state)| hooks::describe(*state)).unwrap_or("");
+                        let reason = states.iter().find(|(_, state)| *state == hooks::HookState::Foreign).map(|(_, state)| hooks::describe(*state)).unwrap_or("");
                         ui::line(&format!("{} {name} {}", ui::yellow("!"), ui::dim(reason)));
                     }
                 }

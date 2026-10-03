@@ -401,6 +401,7 @@ impl Store {
         Ok(())
     }
 
+    #[cfg(test)]
     pub fn connection(&self) -> &Connection {
         &self.connection
     }
@@ -642,38 +643,6 @@ impl Store {
         self.reviewer(&id)?.ok_or_else(|| "the new Reviewer could not be read back".to_string())
     }
 
-    /// Keeps an imported Reviewer's id and history intact.
-    pub fn insert_reviewer(&self, reviewer: &Reviewer) -> Result<bool> {
-        let slug = self.free_slug(&reviewer.name, Some(&reviewer.id))?;
-        let inserted = self
-            .connection
-            .execute(
-                "INSERT OR IGNORE INTO reviewers (id, slug, name, instruction, scope, paths, context_files, enabled, blocking, model, version, origin, created_at, updated_at, classifier)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
-                params![
-                    reviewer.id,
-                    slug,
-                    reviewer.name,
-                    reviewer.instruction,
-                    reviewer.scope.as_str(),
-                    to_json(&reviewer.paths),
-                    to_json(&reviewer.context_files),
-                    reviewer.enabled as i64,
-                    reviewer.blocking as i64,
-                    reviewer.model,
-                    reviewer.version,
-                    to_json(&reviewer.origin),
-                    reviewer.created_at,
-                    reviewer.updated_at,
-                    reviewer.classifier.as_text()
-                ],
-            )
-            .map_err(db_error)?;
-        for project_id in &reviewer.project_ids {
-            self.link(&reviewer.id, project_id)?;
-        }
-        Ok(inserted > 0)
-    }
 
     /// A new instruction is a new version, so evals and decisions say which wording judged them.
     pub fn update_reviewer(&self, id: &str, changes: ReviewerChanges) -> Result<Reviewer> {

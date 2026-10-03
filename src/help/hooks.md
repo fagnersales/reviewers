@@ -28,7 +28,7 @@
 
 - **Not this repo:** `reviewers ignore` stops Reviewers judging it, even under the global hooks; `reviewers init` turns them back on.
 
-`reviewers hooks status` says whether the global hooks are on, then one line per registered repo (`reviewers repos` lists them; a repo never added doesn't appear): `covered by the global hooks`, `ignored`, or, for a repo with its own install, each hook as `installed`, `missing`, `left alone: another tool's hook is there` or `left alone: Personal Workspace's hook is there`.
+`reviewers hooks status` says whether the global hooks are on, then one line per registered repo (`reviewers repos` lists them; a repo never added doesn't appear): `covered by the global hooks`, `ignored`, or, for a repo with its own install, each hook as `installed`, `missing` or `left alone: another tool's hook is there`.
 
 ## A commit
 

@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 /// Below this, a Reviewer is cleared without running. Replayed over 183 real commits (667 sessions, 30
 /// blocks), 15% skipped 46% of the sessions and missed no block; 20% missed 1, and 25% missed 3.
 pub const DEFAULT_CUTOFF: f64 = 0.15;
-/// Measured by Personal Workspace against the live model: a call is refused above roughly 32,768 input tokens.
+/// Measured against the live model: a call is refused above roughly 32,768 input tokens.
 const MAX_CHANGE_CHARS: usize = 40_000;
 const MAX_QUESTION_CHARS: usize = 16_000;
 /// Reviewers the classifier may clear wait for it, so a slow answer can't hold a commit for long.

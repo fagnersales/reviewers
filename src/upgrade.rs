@@ -81,7 +81,7 @@ fn finish() -> Outcome {
     for project in store.projects()? {
         let root = PathBuf::from(&project.root);
         let ours = hooks::state_of(&root).is_ok_and(|states| states.iter().any(|(_, state)| *state == Some(hooks::HookState::Installed)));
-        if ours && hooks::install(&root, false).is_ok() {
+        if ours && hooks::install(&root).is_ok() {
             refreshed += 1;
         }
     }

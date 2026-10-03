@@ -15,9 +15,6 @@ pub enum HooksCommand {
         /// Every registered repo that isn't ignored.
         #[arg(long)]
         all: bool,
-        /// Replace Personal Workspace's hooks.
-        #[arg(long)]
-        take_over: bool,
         /// Through git's global core.hooksPath: every repo without its own hooks folder, new ones included, with no setup. Each repo's own hooks still run first (or, if another global hooks folder was set before, that folder's).
         #[arg(long, conflicts_with_all = ["path", "all"])]
         global: bool,
@@ -56,7 +53,7 @@ pub fn list(json_output: bool) -> Outcome {
 }
 
 pub fn print_hook_states(name: &str, states: &[(&str, HookState)]) {
-    let ours = states.iter().all(|(_, state)| matches!(state, HookState::Installed | HookState::Updated | HookState::TookOver));
+    let ours = states.iter().all(|(_, state)| matches!(state, HookState::Installed | HookState::Updated));
     let mark = if ours { ui::green("✓") } else { ui::yellow("!") };
     let detail: Vec<String> = states.iter().map(|(hook, state)| format!("{hook} {}", hooks::describe(*state))).collect();
     println!("{mark} {} {}", ui::bold(name), ui::dim(&detail.join(" · ")));
@@ -71,20 +68,11 @@ pub fn init(path: Option<PathBuf>) -> Outcome {
     if project.ignored {
         store.set_ignored(&project.id, false)?;
     }
-    let states = match hooks::cover(&main, false)? {
-        hooks::Coverage::Global => {
-            println!("{} {} {}", ui::green("✓"), ui::bold(&project.name), ui::dim("· the global hooks cover it"));
-            Vec::new()
-        }
-        hooks::Coverage::Repo(states) => {
-            print_hook_states(&project.name, &states);
-            states
-        }
-    };
-    let reviewers = store.reviewers_for_project(&project.id)?.into_iter().filter(|reviewer| reviewer.enabled).count();
-    if states.iter().any(|(_, state)| *state == HookState::Workspace) {
-        println!("{}", ui::dim("Personal Workspace still runs here. `reviewers hooks install --take-over` switches this repo to reviewers."));
+    match hooks::cover(&main)? {
+        hooks::Coverage::Global => println!("{} {} {}", ui::green("✓"), ui::bold(&project.name), ui::dim("· the global hooks cover it")),
+        hooks::Coverage::Repo(states) => print_hook_states(&project.name, &states),
     }
+    let reviewers = store.reviewers_for_project(&project.id)?.into_iter().filter(|reviewer| reviewer.enabled).count();
     println!(
         "{}",
         ui::dim(&if reviewers == 0 {
@@ -134,7 +122,7 @@ pub fn hooks(command: HooksCommand) -> Outcome {
             }
             Ok(0)
         }
-        HooksCommand::Install { path, all, take_over, .. } => {
+        HooksCommand::Install { path, all, .. } => {
             let targets: Vec<(String, PathBuf)> = if all {
                 store.projects()?.into_iter().filter(|project| !project.ignored).map(|project| (project.name, PathBuf::from(project.root))).collect()
             } else {
@@ -147,7 +135,7 @@ pub fn hooks(command: HooksCommand) -> Outcome {
                     println!("{} {} {}", ui::dim("·"), name, ui::dim("· folder is gone"));
                     continue;
                 }
-                match hooks::install(&root, take_over) {
+                match hooks::install(&root) {
                     Ok(states) => print_hook_states(&name, &states),
                     Err(error) => println!("{} {name} {}", ui::red("✗"), ui::dim(&error)),
                 }

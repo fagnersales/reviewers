@@ -258,7 +258,6 @@ Install the hooks in this repo (or PATH), in every registered repo with --all, o
 
   <PATH>: Any path inside the repo; defaults to the current directory
   --all: Every registered repo that isn't ignored
-  --take-over: Replace Personal Workspace's hooks
   --global: Through git's global core.hooksPath: every repo without its own hooks folder, new ones included, with no setup. Each repo's own hooks still run first (or, if another global hooks folder was set before, that folder's)
 
 ### `reviewers hooks uninstall`
@@ -280,13 +279,6 @@ Show or set the model Reviewers run on. A Reviewer's own model (`edit --model`) 
 
   <MODEL>: Any model id or alias `claude --model` accepts (`sonnet`, `opus`, or a full id), or `default` to clear this level. Leave it out to print the current one
   --repo: For the repo you're in only
-
-### `reviewers import`
-
-Bring over Reviewers, history and evals from Personal Workspace
-
-  --from <FROM>: Personal Workspace's database. Defaults to ~/apps/personalworkspace/.data/workspace.sqlite
-  --hooks: Also switch every imported repo's git hooks from Personal Workspace to reviewers
 
 ### `reviewers classifier status`
 
@@ -474,7 +466,7 @@ Running it again skips any suggestion with the same name as an existing Reviewer
 
 - **Not this repo:** `reviewers ignore` stops Reviewers judging it, even under the global hooks; `reviewers init` turns them back on.
 
-`reviewers hooks status` says whether the global hooks are on, then one line per registered repo (`reviewers repos` lists them; a repo never added doesn't appear): `covered by the global hooks`, `ignored`, or, for a repo with its own install, each hook as `installed`, `missing`, `left alone: another tool's hook is there` or `left alone: Personal Workspace's hook is there`.
+`reviewers hooks status` says whether the global hooks are on, then one line per registered repo (`reviewers repos` lists them; a repo never added doesn't appear): `covered by the global hooks`, `ignored`, or, for a repo with its own install, each hook as `installed`, `missing` or `left alone: another tool's hook is there`.
 
 ## A commit
 
