@@ -1,7 +1,7 @@
 use super::Outcome;
 use clap::Args;
 
-#[derive(Args, Default)]
+#[derive(Args)]
 pub struct OnboardArgs {
     /// How far back to read, in days.
     #[arg(long, default_value_t = 90)]
@@ -9,7 +9,7 @@ pub struct OnboardArgs {
     /// Only these repos, by folder name, comma-separated (skips the repo picker).
     #[arg(long)]
     pub repos: Option<String>,
-    /// The model the agents run on (skips the model picker).
+    /// The model for extraction and merging: a Claude id/alias, `codex:<model>` or `codex` (skips the picker).
     #[arg(long)]
     pub model: Option<String>,
     /// Agents running at once.
@@ -27,6 +27,13 @@ pub struct OnboardArgs {
     /// Don't give your coding agents the reviewers skill.
     #[arg(long)]
     pub no_skill: bool,
+}
+
+// Bare `reviewers` enters onboarding without Clap parsing this subcommand.
+impl Default for OnboardArgs {
+    fn default() -> Self {
+        Self { since: 90, repos: None, model: None, parallel: 8, max: None, yes: false, dry_run: false, no_skill: false }
+    }
 }
 
 pub fn run(args: OnboardArgs) -> Outcome {

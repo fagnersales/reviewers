@@ -35,7 +35,7 @@
 1. **commit-msg** takes the staged diff and picks every enabled Reviewer that applies: its scope (every repo, or this one) and its `--paths` match the files changed.
 2. A Reviewer already asked exactly this (the same diff, and the same name, instruction, model, and context files with the same contents) gets that verdict back without running: committing unchanged code after a block brings the same block back at once. Change the code, or the Reviewer if it's wrong. Only when the person asks for a fresh judgement of the same code: `REVIEWERS_FRESH=1 git commit …`.
 3. With a classifier connected, one quick call clears the Reviewers the change can't concern (`reviewers help classifier`).
-4. The rest run at once, each a read-only Claude Code session in the repo. It can open and search any file, but can't change anything or run commands. The diff it judges is the staged change; files it opens are read from the working tree, unstaged edits included.
+4. The rest run at once, each a read-only Claude Code or Codex session in the repo. Claude uses Read/Grep/Glob; Codex can run read-only shell commands inside its sandbox, with approvals disabled. Neither can edit the repository. The diff it judges is the staged change; files it opens are read from the working tree, unstaged edits included.
 5. A block stops the commit and prints, for each block, the file, the lines and the fix. A block from an advisory Reviewer (`--advisory`) is printed as a note, and the commit goes through.
 6. **post-commit** ties the landed commit to the review that let it through, so the history shows which commit each review became.
 

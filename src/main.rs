@@ -1,5 +1,7 @@
+mod agent;
 mod claude;
 mod classifier;
+mod codex;
 mod commands;
 mod diff;
 mod evals;
@@ -158,7 +160,7 @@ pub enum Command {
     Hooks(commands::repos::HooksCommand),
     /// Show or set the model Reviewers run on. A Reviewer's own model (`edit --model`) wins, then the repo's, then this default, then Claude Code's own.
     Model {
-        /// Any model id or alias `claude --model` accepts (`sonnet`, `opus`, or a full id), or `default` to clear this level. Leave it out to print the current one.
+        /// A Claude id/alias (sonnet, opus), `codex:<model>` or `codex` for Codex's default. `default` clears this level. Omit to print the current one.
         model: Option<String>,
         /// For the repo you're in only.
         #[arg(long)]

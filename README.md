@@ -2,7 +2,7 @@
 
 Your rules about code, checked on every commit your coding agent makes.
 
-Each Reviewer is one rule ("no type casts", "errors reach users through the error map"). A git hook runs every Reviewer that applies to the staged diff, all at once, each as a read-only Claude Code session. When one blocks, the commit stops and the agent gets the file, the lines and what to do instead, then fixes it and commits again.
+Each Reviewer is one rule ("no type casts", "errors reach users through the error map"). A git hook runs every Reviewer that applies to the staged diff, all at once, each as a read-only Claude Code or Codex session. When one blocks, the commit stops and the agent gets the file, the lines and what to do instead, then fixes it and commits again.
 
 ## Install
 
@@ -10,9 +10,22 @@ Each Reviewer is one rule ("no type casts", "errors reach users through the erro
 curl -fsSL https://reviewers.sh/install | sh
 ```
 
-The first run reads your Claude Code sessions, finds the rules you keep repeating to your agents, and turns them into Reviewers. Run it again any time with `reviewers onboard`.
+The first run reads your Claude Code and Codex sessions, finds the rules you keep repeating to your agents, and turns them into Reviewers. Run it again any time with `reviewers onboard`.
 
-Requires `git` and [Claude Code](https://claude.com/claude-code). Reviewers run on your own Claude Code, and everything is stored in `~/.reviewers/`. Nothing is sent anywhere else, unless you connect the optional classifier (`reviewers help classifier`), which sends each commit's diff to Jev.
+Requires `git` and either [Claude Code](https://claude.com/claude-code) or [Codex CLI](https://developers.openai.com/codex/cli/), installed and signed in. Reviewers run through your selected CLI, and everything is stored in `~/.reviewers/`. Nothing is sent anywhere else, unless you connect the optional classifier (`reviewers help classifier`), which sends each commit's diff to Jev.
+
+For Codex, use a recent CLI supporting `exec --json --output-schema --ephemeral --ignore-user-config --ignore-rules`:
+
+```sh
+reviewers onboard --model codex          # learn from Claude and Codex transcripts using Codex
+reviewers model codex                    # use Codex for reviews and evals
+reviewers model 'codex:<model-id>' --repo # optional: choose a specific model for this repo
+reviewers edit <reviewer> --model sonnet  # individual Reviewers can still use Claude
+```
+
+Onboarding discovers Codex JSONL rollouts in `~/.codex/{sessions,archived_sessions}` and `$CODEX_HOME`, alongside Claude transcripts. A Codex model chosen there becomes the review default if none is configured. Transcript source and reviewer model are independent. Existing unqualified model settings still use Claude; `codex` uses Codex's built-in default and `codex:<model-id>` selects a model explicitly.
+
+Codex runs in a read-only sandbox with approvals, hooks and web search disabled. It uses saved CLI authentication, but ignores user configuration and execution rules to isolate reviews from personal tools and permission overrides; select custom models explicitly. Claude keeps its Read/Grep/Glob tool allowlist.
 
 ## Use
 

@@ -1,6 +1,6 @@
 # Reviewers 0.1.0: guide for coding agents
 
-Reviewers are the person's rules about code, checked on every commit. Each Reviewer is one rule. A git `commit-msg` hook runs every Reviewer that applies to the staged diff, all at once, each as its own read-only Claude Code session. If any blocks, the commit stops and the hook prints, for each block, the file and lines, what is wrong, and what the code should do instead.
+Reviewers are the person's rules about code, checked on every commit. Each Reviewer is one rule. A git `commit-msg` hook runs every Reviewer that applies to the staged diff, all at once, each as its own read-only Claude Code or Codex session. If any blocks, the commit stops and the hook prints, for each block, the file and lines, what is wrong, and what the code should do instead.
 
 You are the one who fixes, adds and tunes Reviewers. The person states rules; you do the work.
 
@@ -36,7 +36,7 @@ The classifier is optional. It asks Jev, TypeSafe's evaluation model, which Revi
 
 ## Data
 
-Everything lives in `~/.reviewers/reviewers.sqlite` on this machine. Diffs go to the model through the person's own Claude Code, and, when a classifier is connected, to its provider.
+Everything lives in `~/.reviewers/reviewers.sqlite` on this machine. Diffs go to the model through the person's own Claude Code or Codex CLI, and, when a classifier is connected, to its provider.
 
 ## Updates
 
@@ -51,12 +51,12 @@ Environment variables:
 - `REVIEWERS_BYPASS=1`: the hooks let the commit through without reviewing it. Only when the person asks.
 - `REVIEWERS_FRESH=1`: judge again even code that was judged before, instead of giving the earlier verdict back. Only when the person asks.
 - `REVIEWERS_HOME`: where everything is kept, instead of `~/.reviewers`. To move existing data: move the whole folder; set the variable wherever commits happen (the hooks read it from the committing shell); if `bin/reviewers` moved with it, fix the PATH line the installer added (marked `# added by reviewers`); then, if the global hooks were on, run `reviewers hooks install --global` again, and run `reviewers hooks install --all` for repos with their own install, so every hook calls the program where it now is. Settings, including the global hooks folder that was set before, live in `reviewers.sqlite` and move with it.
-- `REVIEWERS_TRACE_DIR`: keeps every Claude session's raw output stream there, one `.jsonl` file each, for a review that ended without an answer: `REVIEWERS_TRACE_DIR=/tmp/reviewers-trace git commit …`.
+- `REVIEWERS_TRACE_DIR`: keeps every reviewer session's raw output stream there, one `.jsonl` file each, for a review that ended without an answer: `REVIEWERS_TRACE_DIR=/tmp/reviewers-trace git commit …`.
 - `REVIEWERS_RELEASES_URL`: where `reviewers upgrade`, the daily check and the installer read the release manifest, instead of `https://reviewers.sh/releases/latest.txt`.
 - `REVIEWERS_NO_UPDATE_CHECK=1`: no daily look for a newer release.
 - `REVIEWERS_NO_ONBOARD=1`: the installer doesn't start the first run.
 - `NO_COLOR`: plain text, no colors.
-- `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `XDG_CONFIG_HOME`: where `reviewers skill install` finds Claude Code, Codex and OpenCode.
+- `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `XDG_CONFIG_HOME`: where `reviewers skill install` finds Claude Code, Codex and OpenCode. Onboarding also reads transcripts from `CLAUDE_CONFIG_DIR` and `CODEX_HOME`.
 
 Files, in `~/.reviewers` (or `REVIEWERS_HOME`):
 
@@ -80,7 +80,7 @@ Read your agent sessions and turn the rules you keep repeating into Reviewers
 
   --since <SINCE>: How far back to read, in days (default: 90)
   --repos <REPOS>: Only these repos, by folder name, comma-separated (skips the repo picker)
-  --model <MODEL>: The model the agents run on (skips the model picker)
+  --model <MODEL>: The model for extraction and merging: a Claude id/alias, `codex:<model>` or `codex` (skips the picker)
   --parallel <PARALLEL>: Agents running at once (default: 8)
   --max <MAX>: At most this many Reviewers
   --yes: Take the defaults without asking: every repo, your usual model, the strongest Reviewers on, hooks installed
@@ -118,7 +118,7 @@ Create a Reviewer
   --repo <REPOS>: Repos to judge (paths); repeat it for several. Defaults to the repo you're in
   --paths <PATHS>: Only run when the diff touches these globs, comma-separated: `convex/**,shared/**`
   --context-files <CONTEXT_FILES>: Repo files attached to every review as reference, comma-separated
-  --model <MODEL>: Model for this Reviewer only: any id or alias `claude --model` accepts. Without it, the repo's or the default model (`reviewers model`)
+  --model <MODEL>: Model for this Reviewer: a Claude id/alias, `codex:<model>` or `codex`. Otherwise inherits the repo's or default model
   --classifier <CLASSIFIER>: When the classifier may skip it: `default`, `off`, or a cutoff from 0 to 1
   --disabled: Create it turned off
   --advisory: Report its blocks without stopping the commit
@@ -282,7 +282,7 @@ Whether the global hooks are on, and how each registered repo is covered
 
 Show or set the model Reviewers run on. A Reviewer's own model (`edit --model`) wins, then the repo's, then this default, then Claude Code's own
 
-  <MODEL>: Any model id or alias `claude --model` accepts (`sonnet`, `opus`, or a full id), or `default` to clear this level. Leave it out to print the current one
+  <MODEL>: A Claude id/alias (sonnet, opus), `codex:<model>` or `codex` for Codex's default. `default` clears this level. Omit to print the current one
   --repo: For the repo you're in only
 
 ### `reviewers classifier status`
@@ -390,9 +390,13 @@ A new instruction is a new version (`reviewers edit <name> --instruction "…"`)
 
 A Reviewer runs on its own model if it has one (`--model sonnet`), else the repo's (`reviewers model sonnet --repo`), else the default (`reviewers model sonnet`), else Claude Code's own. Any id or alias `claude --model` accepts works. `default` clears a level: `reviewers edit <name> --model default`, `reviewers model default --repo`, `reviewers model default`.
 
+Use `codex` for Codex's built-in default or `codex:<model-id>` for a specific Codex model at any of those levels. Unqualified ids and aliases retain their Claude meaning; `claude:<model-id>` is also accepted. These settings apply to evals as well as commit reviews. The transcript source does not determine which provider runs a Reviewer.
+
+Codex needs a recent CLI supporting `exec --json --output-schema --ephemeral --ignore-user-config --ignore-rules`, installed and signed in. Runs use its read-only sandbox with approvals, hooks, web search and subagents disabled. User configuration and execution rules are ignored; saved CLI authentication is reused. The merge step also disables shell tools. Custom model ids should be supplied explicitly; custom providers configured only in user settings are not loaded.
+
 ## Cost
 
-Every Reviewer that applies is a Claude session on every commit, all of them in parallel. A commit waits for the slowest. Ten Reviewers that each take 30 seconds still cost ten sessions of tokens. A rule a linter can enforce should be a lint rule.
+Every Reviewer that applies is an agent session on every commit, all of them in parallel. A commit waits for the slowest. Ten Reviewers that each take 30 seconds still cost ten sessions of tokens. A rule a linter can enforce should be a lint rule.
 
 ---
 
@@ -429,9 +433,11 @@ A case that comes back `not run` fell outside the Reviewer's `--paths`, so it wa
 
 # Onboarding: finding the rules you already hold
 
-`reviewers onboard` (and bare `reviewers` the first time) reads the person's Claude Code sessions from the last 90 days, in every config folder (`~/.claude`, `~/.claude-*`, `$CLAUDE_CONFIG_DIR`), and keeps only what the person typed. Scripted `claude -p` sessions are skipped. Sessions are matched to repos, worktrees included, even deleted ones.
+`reviewers onboard` (and bare `reviewers` the first time) reads the person's Claude Code and Codex sessions from the last 90 days, keeping only what the person typed. Claude sessions come from every config folder (`~/.claude`, `~/.claude-*`, `$CLAUDE_CONFIG_DIR`). Codex JSONL rollouts come from `sessions` and `archived_sessions` under `~/.codex` and `$CODEX_HOME`, including dated subfolders. Duplicate roots and duplicate Codex user-event/response-item representations are read once. Injected context, scripted `claude -p`/`codex exec` sessions and Codex subagent sessions are skipped. Sessions are matched to repos, worktrees included, even deleted ones.
 
 The person picks the repos and the model (the default is the one they used most lately). Then agents read the material in parallel, one share each: a big repo is cut into stretches of time, and small repos share an agent. Each agent reports the rules it finds with evidence: the person's own words, with dates. A final step merges the same rule said in different repos, and decides which rules are personal (`everywhere`) and which belong to one repo.
+
+The picker offers models for installed CLIs. `--model codex` uses Codex's built-in default; `--model codex:<model-id>` selects a Codex model. Claude ids and aliases still work. Either provider can read both transcript sources, and the same selection runs extraction and merging. If no review default is configured, a Codex selection is also saved for subsequent reviews and evals; a Claude selection only reads the transcripts. `--dry-run` builds the material without requiring either CLI or sending anything to a model.
 
 A rule must have come up at least twice, or have been stated as a standing rule ("always", "never"). Rules a linter could enforce are listed apart.
 
@@ -478,7 +484,7 @@ Running it again skips any suggestion with the same name as an existing Reviewer
 1. **commit-msg** takes the staged diff and picks every enabled Reviewer that applies: its scope (every repo, or this one) and its `--paths` match the files changed.
 2. A Reviewer already asked exactly this (the same diff, and the same name, instruction, model, and context files with the same contents) gets that verdict back without running: committing unchanged code after a block brings the same block back at once. Change the code, or the Reviewer if it's wrong. Only when the person asks for a fresh judgement of the same code: `REVIEWERS_FRESH=1 git commit …`.
 3. With a classifier connected, one quick call clears the Reviewers the change can't concern (`reviewers help classifier`).
-4. The rest run at once, each a read-only Claude Code session in the repo. It can open and search any file, but can't change anything or run commands. The diff it judges is the staged change; files it opens are read from the working tree, unstaged edits included.
+4. The rest run at once, each a read-only Claude Code or Codex session in the repo. Claude uses Read/Grep/Glob; Codex can run read-only shell commands inside its sandbox, with approvals disabled. Neither can edit the repository. The diff it judges is the staged change; files it opens are read from the working tree, unstaged edits included.
 5. A block stops the commit and prints, for each block, the file, the lines and the fix. A block from an advisory Reviewer (`--advisory`) is printed as a note, and the commit goes through.
 6. **post-commit** ties the landed commit to the review that let it through, so the history shows which commit each review became.
 
@@ -505,7 +511,7 @@ Every review is kept: `reviewers runs`, `reviewers run <id>`, `reviewers stats`.
 
 Jev is an evaluation model by TypeSafe: it answers closed questions with a probability, cheaply and fast. SystemOne is TypeSafe's API for it.
 
-A cheap first pass before the Claude sessions. On each commit, one call to Jev, an evaluation model, asks about every Reviewer at once: does this change break the rule? Jev answers each with a probability. A Reviewer scored under its cutoff is approved without a session (cleared); the others run as usual.
+A cheap first pass before the reviewer sessions. On each commit, one call to Jev, an evaluation model, asks about every Reviewer at once: does this change break the rule? Jev answers each with a probability. A Reviewer scored under its cutoff is approved without a session (cleared); the others run as usual.
 
 The classifier never blocks a commit: a high score only means the Reviewer runs. When it can't answer (an error, a timeout, a file too large to read whole), every Reviewer runs in full.
 

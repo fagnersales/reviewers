@@ -1,6 +1,6 @@
 # Reviewers {{VERSION}}: guide for coding agents
 
-Reviewers are the person's rules about code, checked on every commit. Each Reviewer is one rule. A git `commit-msg` hook runs every Reviewer that applies to the staged diff, all at once, each as its own read-only Claude Code session. If any blocks, the commit stops and the hook prints, for each block, the file and lines, what is wrong, and what the code should do instead.
+Reviewers are the person's rules about code, checked on every commit. Each Reviewer is one rule. A git `commit-msg` hook runs every Reviewer that applies to the staged diff, all at once, each as its own read-only Claude Code or Codex session. If any blocks, the commit stops and the hook prints, for each block, the file and lines, what is wrong, and what the code should do instead.
 
 You are the one who fixes, adds and tunes Reviewers. The person states rules; you do the work.
 
@@ -36,7 +36,7 @@ The classifier is optional. It asks Jev, TypeSafe's evaluation model, which Revi
 
 ## Data
 
-Everything lives in `~/.reviewers/reviewers.sqlite` on this machine. Diffs go to the model through the person's own Claude Code, and, when a classifier is connected, to its provider.
+Everything lives in `~/.reviewers/reviewers.sqlite` on this machine. Diffs go to the model through the person's own Claude Code or Codex CLI, and, when a classifier is connected, to its provider.
 
 ## Updates
 
@@ -51,12 +51,12 @@ Environment variables:
 - `REVIEWERS_BYPASS=1`: the hooks let the commit through without reviewing it. Only when the person asks.
 - `REVIEWERS_FRESH=1`: judge again even code that was judged before, instead of giving the earlier verdict back. Only when the person asks.
 - `REVIEWERS_HOME`: where everything is kept, instead of `~/.reviewers`. To move existing data: move the whole folder; set the variable wherever commits happen (the hooks read it from the committing shell); if `bin/reviewers` moved with it, fix the PATH line the installer added (marked `# added by reviewers`); then, if the global hooks were on, run `reviewers hooks install --global` again, and run `reviewers hooks install --all` for repos with their own install, so every hook calls the program where it now is. Settings, including the global hooks folder that was set before, live in `reviewers.sqlite` and move with it.
-- `REVIEWERS_TRACE_DIR`: keeps every Claude session's raw output stream there, one `.jsonl` file each, for a review that ended without an answer: `REVIEWERS_TRACE_DIR=/tmp/reviewers-trace git commit …`.
+- `REVIEWERS_TRACE_DIR`: keeps every reviewer session's raw output stream there, one `.jsonl` file each, for a review that ended without an answer: `REVIEWERS_TRACE_DIR=/tmp/reviewers-trace git commit …`.
 - `REVIEWERS_RELEASES_URL`: where `reviewers upgrade`, the daily check and the installer read the release manifest, instead of `https://reviewers.sh/releases/latest.txt`.
 - `REVIEWERS_NO_UPDATE_CHECK=1`: no daily look for a newer release.
 - `REVIEWERS_NO_ONBOARD=1`: the installer doesn't start the first run.
 - `NO_COLOR`: plain text, no colors.
-- `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `XDG_CONFIG_HOME`: where `reviewers skill install` finds Claude Code, Codex and OpenCode.
+- `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `XDG_CONFIG_HOME`: where `reviewers skill install` finds Claude Code, Codex and OpenCode. Onboarding also reads transcripts from `CLAUDE_CONFIG_DIR` and `CODEX_HOME`.
 
 Files, in `~/.reviewers` (or `REVIEWERS_HOME`):
 

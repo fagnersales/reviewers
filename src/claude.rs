@@ -1,3 +1,4 @@
+use crate::agent::{Activity, Outcome, Request, Tokens};
 use crate::util::{clip, now_iso, str_field, u64_field};
 use regex::Regex;
 use serde_json::{Value, json};
@@ -11,52 +12,6 @@ use std::time::{Duration, Instant};
 
 /// Tool outputs are clipped before storage; a Read of a large file is otherwise most of the row.
 const TOOL_OUTPUT_MAX_CHARS: usize = 8_000;
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct Tokens {
-    /// Everything the model took in, cache hits included: each turn re-reads the conversation.
-    pub read: u64,
-    pub written: u64,
-}
-
-impl std::ops::Add for Tokens {
-    type Output = Tokens;
-    fn add(self, other: Tokens) -> Tokens {
-        Tokens { read: self.read + other.read, written: self.written + other.written }
-    }
-}
-
-pub enum Activity {
-    Thinking(u64),
-    Tool { name: String, input: Value },
-    /// The structured answer as it streams: every `name` written so far.
-    Answering(Vec<String>),
-    Tokens(Tokens),
-}
-
-pub struct Request<'a> {
-    pub prompt: &'a str,
-    pub cwd: &'a Path,
-    pub schema: &'a Value,
-    /// The tool definitions the model sees at all; `StructuredOutput` is added by `--json-schema`.
-    pub tools: &'a [&'a str],
-    pub allowed_tools: &'a [&'a str],
-    pub add_dirs: &'a [PathBuf],
-    pub model: Option<&'a str>,
-    pub timeout: Option<Duration>,
-    /// Stream token-by-token events, for live progress. Costs nothing but stdout volume.
-    pub live: bool,
-}
-
-pub struct Outcome {
-    pub output: Value,
-    pub tokens: Tokens,
-    pub turns: u32,
-    pub tool_calls: u32,
-    pub model: Option<String>,
-    /// The session as stored on a decision: prompt, system line, thinking, tools, text.
-    pub session: Vec<Value>,
-}
 
 fn running() -> &'static Mutex<Vec<u32>> {
     static RUNNING: OnceLock<Mutex<Vec<u32>>> = OnceLock::new();
