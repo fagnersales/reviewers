@@ -89,8 +89,10 @@ fn explain(fresh: &[&Suggestion]) {
 pub fn run(args: SuggestArgs) -> Outcome {
     let interactive = ui::interactive() && !args.yes;
     let live = ui::stdout_is_tty();
-    if !claude::is_installed() {
-        return Err("suggestions come from Claude Code, and `claude` isn't on this machine's PATH".into());
+    let claude_installed = agent::is_installed(Provider::Claude);
+    let codex_installed = agent::is_installed(Provider::Codex);
+    if !claude_installed && !codex_installed {
+        return Err("suggestions come from Claude Code or Codex, and neither `claude` nor `codex` is on this machine's PATH".into());
     }
     let store = Store::open_default()?;
     let state = State::load();
@@ -140,7 +142,12 @@ pub fn run(args: SuggestArgs) -> Outcome {
         return Ok(0);
     }
 
-    let model: Option<String> = args.model.clone().or_else(|| model_choices(&scan.models).first().map(|(id, _)| id.clone()));
+    let model: Option<String> = args.model.clone().or_else(|| model_choices(&scan.models, claude_installed, codex_installed).first().map(|(id, _)| id.clone()));
+    let provider = agent::selection(model.as_deref()).0;
+    if !match provider { Provider::Claude => claude_installed, Provider::Codex => codex_installed } {
+        let cli = match provider { Provider::Claude => "claude", Provider::Codex => "codex" };
+        return Err(format!("this model runs on `{cli}`, which isn't on PATH; install it and sign in, or choose another --model"));
+    }
     ui::step(&format!("{} · {}", plural(chosen.len(), "repo"), model.as_deref().map(model_label).unwrap_or_else(|| "your default model".into())));
     let directory = run_directory("suggest")?;
     let jobs = digest::write_jobs(&directory, &chosen, args.parallel.max(1))?;

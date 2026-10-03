@@ -12,7 +12,7 @@ pub struct SuggestArgs {
     /// Only these repos, by folder name, comma-separated.
     #[arg(long)]
     pub repos: Option<String>,
-    /// The model the agents run on; defaults to the one you used most lately.
+    /// The model the agents run on: a Claude id or alias, `codex`, or `codex:<model-id>`. Defaults to the one you used most lately.
     #[arg(long)]
     pub model: Option<String>,
     /// Agents running at once.

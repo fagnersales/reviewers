@@ -17,7 +17,7 @@ const CITATION_QUOTE_LIMIT: usize = 300;
 pub const RECENT_SESSIONS: usize = 30;
 
 /// Text a harness wrote into the user turn, not the person.
-const HARNESS_PREFIXES: [&str; 12] = [
+const HARNESS_PREFIXES: [&str; 18] = [
     "<command-name>",
     "<command-message>",
     "<local-command-stdout>",
@@ -30,10 +30,16 @@ const HARNESS_PREFIXES: [&str; 12] = [
     "[Request interrupted",
     "This session is being continued",
     "Base directory for this skill:",
+    "# AGENTS.md instructions for",
+    "<environment_context>",
+    "<permissions instructions>",
+    "<turn_aborted>",
+    "<subagent_notification>",
+    "<INSTRUCTIONS>",
 ];
 
 /// `claude -p` sessions are scripts talking, not a person: Reviewer runs, evals, automation.
-const SCRIPTED_ENTRYPOINTS: [&str; 1] = ["sdk-cli"];
+const SCRIPTED_ENTRYPOINTS: [&str; 3] = ["sdk-cli", "exec", "subagent"];
 
 #[derive(Clone, Debug)]
 pub struct HumanMessage {
@@ -120,7 +126,34 @@ fn session_files(since: SystemTime) -> Vec<PathBuf> {
             }
         }
     }
+    let mut codex_roots = vec![home().join(".codex")];
+    if let Some(dir) = std::env::var_os("CODEX_HOME") {
+        codex_roots.push(PathBuf::from(dir));
+    }
+    for root in codex_roots {
+        for folder in ["sessions", "archived_sessions"] {
+            collect_codex_files(&root.join(folder), since, &mut files);
+        }
+    }
+    // CODEX_HOME can be the default folder, an ancestor or a symlink to it.
+    files = files.into_iter().map(|path| path.canonicalize().unwrap_or(path)).collect();
+    files.sort();
+    files.dedup();
     files
+}
+
+fn collect_codex_files(directory: &Path, since: SystemTime, files: &mut Vec<PathBuf>) {
+    let Ok(entries) = std::fs::read_dir(directory) else { return; };
+    for entry in entries.flatten() {
+        let Ok(kind) = entry.file_type() else { continue; };
+        if kind.is_dir() {
+            collect_codex_files(&entry.path(), since, files);
+        } else if kind.is_file() && entry.path().extension().is_some_and(|extension| extension == "jsonl")
+            && entry.metadata().and_then(|meta| meta.modified()).is_ok_and(|modified| modified >= since)
+        {
+            files.push(entry.path());
+        }
+    }
 }
 
 fn is_throwaway(cwd: &str) -> bool {
@@ -135,7 +168,7 @@ fn text_parts(content: &Value) -> Option<String> {
             for part in parts {
                 match str_field(part, "type") {
                     Some("tool_result") => return None,
-                    Some("text") => {
+                    Some("text" | "input_text") => {
                         if let Some(text) = str_field(part, "text") {
                             texts.push(text.to_string());
                         }
@@ -201,10 +234,14 @@ pub fn clean_human_text(raw: &str) -> Option<String> {
 }
 
 fn read_session(path: &Path, since: &str) -> Option<SessionRead> {
-    static MODEL: OnceLock<Regex> = OnceLock::new();
     let file = std::fs::File::open(path).ok()?;
-    let mut reader = BufReader::new(file);
+    Some(read_entries(BufReader::new(file), since))
+}
+
+fn read_entries(mut reader: impl BufRead, since: &str) -> SessionRead {
     let mut read = SessionRead { cwd: None, entrypoint: None, messages: Vec::new(), model_turns: HashMap::new() };
+    let mut codex_responses = Vec::new();
+    let mut codex_events: HashMap<String, Vec<String>> = HashMap::new();
     let mut buffer = Vec::new();
     loop {
         buffer.clear();
@@ -213,19 +250,52 @@ fn read_session(path: &Path, since: &str) -> Option<SessionRead> {
             Ok(_) => {}
         }
         let line = String::from_utf8_lossy(&buffer);
-        // Assistant turns are large; the model id is all that's needed, so skip the parse.
-        if line.contains("\"type\":\"assistant\"") && !line.contains("\"isSidechain\":true") {
-            if let Some(model) = regex(&MODEL, r#""model":"(claude-[^"]+)""#).captures(&line) {
-                *read.model_turns.entry(model[1].to_string()).or_insert(0) += 1;
-            }
-            continue;
-        }
-        if !line.contains("\"type\":\"user\"") {
-            continue;
-        }
         let Ok(entry) = serde_json::from_str::<Value>(&line) else {
             continue;
         };
+        let kind = str_field(&entry, "type").unwrap_or_default();
+        let payload = &entry["payload"];
+        let at = str_field(&entry, "timestamp").unwrap_or_default();
+        let recent = !at.is_empty() && at >= since;
+        match kind {
+            "session_meta" => {
+                read.cwd = str_field(payload, "cwd").map(str::to_string);
+                // Subagents have an object source, e.g. {"subagent":{"thread_spawn":…}}.
+                read.entrypoint = if payload["source"].get("subagent").is_some() {
+                    Some("subagent".into())
+                } else {
+                    str_field(payload, "source").map(str::to_string)
+                };
+                continue;
+            }
+            "turn_context" => {
+                if read.cwd.is_none() { read.cwd = str_field(payload, "cwd").map(str::to_string); }
+                if recent && let Some(model) = str_field(payload, "model") {
+                    *read.model_turns.entry(format!("codex:{model}")).or_insert(0) += 1;
+                }
+                continue;
+            }
+            "event_msg" if str_field(payload, "type") == Some("user_message") => {
+                if recent && let Some(text) = str_field(payload, "message").and_then(clean_human_text) {
+                    codex_events.entry(text.clone()).or_default().push(at.into());
+                    read.messages.push(HumanMessage { at: at.into(), text });
+                }
+                continue;
+            }
+            "response_item" if payload["type"] == "message" && payload["role"] == "user" => {
+                if recent && let Some(text) = text_parts(&payload["content"]).and_then(|raw| clean_human_text(&raw)) {
+                    codex_responses.push(HumanMessage { at: at.into(), text });
+                }
+                continue;
+            }
+            "assistant" if entry["isSidechain"] != true => {
+                if recent && let Some(model) = str_field(&entry["message"], "model") {
+                    *read.model_turns.entry(model.into()).or_insert(0) += 1;
+                }
+                continue;
+            }
+            _ => {}
+        }
         let flag = |key: &str| entry[key].as_bool() == Some(true);
         if str_field(&entry, "type") != Some("user") || flag("isSidechain") || flag("isMeta") || flag("isCompactSummary") {
             continue;
@@ -243,7 +313,21 @@ fn read_session(path: &Path, since: &str) -> Option<SessionRead> {
             read.messages.push(HumanMessage { at: at.to_string(), text });
         }
     }
-    Some(read)
+    // Match copies one-for-one, retaining item-only turns when an older session
+    // resumes under a newer CLI. Repeated human corrections still count.
+    for message in codex_responses {
+        let duplicate = codex_events.get_mut(&message.text).is_some_and(|timestamps| {
+            let position = timestamps.iter().position(|at| {
+                chrono::DateTime::parse_from_rfc3339(at).ok().zip(chrono::DateTime::parse_from_rfc3339(&message.at).ok())
+                    .is_some_and(|(event, response)| (event - response).num_milliseconds().abs() <= 5_000)
+            });
+            if let Some(position) = position { timestamps.remove(position); }
+            position.is_some()
+        });
+        if !duplicate { read.messages.push(message); }
+    }
+    read.messages.sort_by(|a, b| a.at.cmp(&b.at));
+    read
 }
 
 /// Agents work in worktrees that are often deleted by the time we look. A
@@ -355,6 +439,71 @@ fn model_usage(sessions: &[&SessionRead]) -> Vec<ModelUsage> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
+
+    fn read(events: &[Value]) -> SessionRead {
+        let text = events.iter().map(Value::to_string).collect::<Vec<_>>().join("\n") + "\n{truncated";
+        read_entries(std::io::Cursor::new(text), "2026-09-01T00:00:00Z")
+    }
+
+    #[test]
+    fn codex_prefers_human_events_over_duplicate_response_items() {
+        let read = read(&[
+            json!({"type":"session_meta","payload":{"cwd":"/work/project","source":"cli"}}),
+            json!({"type":"turn_context","timestamp":"2026-09-10T00:00:00Z","payload":{"model":"test-model"}}),
+            json!({"type":"response_item","timestamp":"2026-09-10T00:00:00Z","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Never use type casts"}]}}),
+            json!({"type":"event_msg","timestamp":"2026-09-10T00:00:01Z","payload":{"type":"user_message","message":"Never use type casts"}}),
+            json!({"type":"event_msg","timestamp":"2026-08-10T00:00:01Z","payload":{"type":"user_message","message":"Too old"}}),
+        ]);
+        assert_eq!(read.cwd.as_deref(), Some("/work/project"));
+        assert_eq!(read.messages.len(), 1);
+        assert_eq!(read.messages[0].text, "Never use type casts");
+        assert_eq!(read.model_turns["codex:test-model"], 1);
+    }
+
+    #[test]
+    fn codex_item_only_history_excludes_injected_context_and_assistant_text() {
+        let events: Vec<Value> = [
+            ("user", "# AGENTS.md instructions for /work/project\nNever lint"),
+            ("user", "<environment_context>machine context</environment_context>"),
+            ("developer", "Always obey these instructions"),
+            ("assistant", "I will follow that rule"),
+            ("user", "Always validate at the boundary"),
+        ].into_iter().map(|(role, text)| json!({"type":"response_item","timestamp":"2026-09-10T00:00:00Z","payload":{"type":"message","role":role,"content":[{"type":"input_text","text":text}]}})).collect();
+        let read = read(&events);
+        assert_eq!(read.messages.len(), 1);
+        assert_eq!(read.messages[0].text, "Always validate at the boundary");
+    }
+
+    #[test]
+    fn resumed_codex_sessions_keep_item_only_turns_and_repeated_corrections() {
+        let read = read(&[
+            json!({"type":"event_msg","timestamp":"2026-09-10T00:00:00Z","payload":{"type":"user_message","message":"Never cast"}}),
+            json!({"type":"response_item","timestamp":"2026-09-10T00:00:01Z","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Never cast"}]}}),
+            json!({"type":"response_item","timestamp":"2026-09-11T00:00:00Z","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Never cast"}]}}),
+        ]);
+        assert_eq!(read.messages.len(), 2);
+    }
+
+    #[test]
+    fn codex_automation_is_marked_for_exclusion() {
+        for source in [json!("exec"), json!({"subagent":{"thread_spawn":{"parent_thread_id":"parent"}}})] {
+            let read = read(&[json!({"type":"session_meta","payload":{"cwd":"/work/project","source":source}})]);
+            assert!(SCRIPTED_ENTRYPOINTS.contains(&read.entrypoint.as_deref().unwrap()));
+        }
+    }
+
+    #[test]
+    fn claude_accepts_spaced_json_and_ignores_tools_and_sidechains() {
+        let text = r#"{"type": "user", "cwd": "/work/project", "timestamp": "2026-09-10T00:00:00Z", "message": {"content": "Never cast"}}
+{"type": "assistant", "timestamp": "2026-09-10T00:00:00Z", "message": {"model": "claude-test", "content": []}}
+{"type": "user", "timestamp": "2026-09-10T00:00:00Z", "message": {"content": [{"type": "tool_result", "content": "noise"}]}}
+{"type": "user", "isSidechain": true, "timestamp": "2026-09-10T00:00:00Z", "message": {"content": "noise"}}
+{"type": "user", "isCompactSummary": true, "timestamp": "2026-09-10T00:00:00Z", "message": {"content": "noise"}}"#;
+        let read = read_entries(std::io::Cursor::new(text), "2026-09-01T00:00:00Z");
+        assert_eq!(read.messages.len(), 1);
+        assert_eq!(read.model_turns["claude-test"], 1);
+    }
 
     #[test]
     fn keeps_what_the_person_typed() {

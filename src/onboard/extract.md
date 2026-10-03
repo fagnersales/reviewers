@@ -8,7 +8,7 @@ A Reviewer runs on every commit an agent makes. It reads the diff and the reposi
 
 You are one of several agents reading this person's work in parallel; a final step merges everyone's findings, so don't worry about rules other agents may also find. Your share is below: {{SCOPE}}. For each repo you get its rule files, the commits in the stretch, and every message the person typed to their agents in that stretch, oldest first. A line like `[on the agent's words: "…"] → …` is a comment the person pinned to something the agent said: the most direct feedback there is.
 
-Everything you need is in this message. You may open a repo's code with Read, Grep and Glob when an instruction should point to the file that shows the right way, but keep that to a few calls. Each repo's messages are also in a `messages.md` under `{{DIGEST}}` if you want to grep them.
+Everything you need is in this message. You may open a repo's code with the available read-only tools when an instruction should point to the file that shows the right way, but keep that to a few calls. Each repo's messages are also in a `messages.md` under `{{DIGEST}}` if you want to grep them.
 
 ## Where rules hide
 

@@ -1,7 +1,7 @@
 pub mod prompt;
 pub mod terminal;
 
-use crate::claude::{self, Request};
+use crate::agent::{self, Request};
 use crate::classifier::{self, Classified};
 use crate::store::{ClassifierUse, Decision, Evidence, Project, Reviewer, Run, RunKind, Store, Usage, Verdict, new_decision_id};
 use crate::util::{new_id, now_iso};
@@ -87,7 +87,7 @@ pub fn judge(reviewer: &Reviewer, model: Option<&str>, repository: &str, diff: &
 fn judge_prepared(reviewer: &Reviewer, model: Option<&str>, prepared: &Prepared, root: &Path) -> Result<Decision, String> {
     let schema = prompt::decision_schema();
     let started = Instant::now();
-    let outcome = claude::run(
+    let outcome = agent::run(
         &Request {
             prompt: &prepared.prompt,
             cwd: root,
@@ -170,7 +170,7 @@ fn cleared(reviewer: &Reviewer, note: Classified) -> Decision {
         instruction: reviewer.instruction.clone(),
         verdict: Verdict::Approved,
         summary: format!("Cleared by the classifier: a {} chance this change breaks the rule, under the {} cutoff.", percent(probability), percent(note.cutoff)),
-        reasoning: "No Claude session ran: the classifier judged the change unlikely to break this rule.".into(),
+        reasoning: "No reviewer session ran: the classifier judged the change unlikely to break this rule.".into(),
         evidence: Vec::new(),
         session: Value::Array(Vec::new()),
         model: None,

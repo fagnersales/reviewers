@@ -25,7 +25,7 @@ pub struct NewArgs {
     /// Repo files attached to every review as reference, comma-separated.
     #[arg(long)]
     pub context_files: Option<String>,
-    /// Model for this Reviewer only: any id or alias `claude --model` accepts. Without it, the repo's or the default model (`reviewers model`).
+    /// Model for this Reviewer: a Claude id/alias, `codex:<model>` or `codex`. Otherwise inherits the repo's or default model.
     #[arg(long)]
     pub model: Option<String>,
     /// When the classifier may skip it: `default`, `off`, or a cutoff from 0 to 1.
