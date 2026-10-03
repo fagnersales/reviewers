@@ -1,4 +1,4 @@
-# Reviewers 0.2.0: guide for coding agents
+# Reviewers 0.2.1: guide for coding agents
 
 Reviewers are the person's rules about code, checked on every commit. Each Reviewer is one rule. A git `commit-msg` hook runs every Reviewer that applies to the staged diff, all at once, each as its own read-only Claude Code or Codex session. If any blocks, the commit stops and the hook prints, for each block, the file and lines, what is wrong, and what the code should do instead.
 
@@ -399,6 +399,8 @@ At most six words, stated as the rule itself: "No type casts", "Errors reach use
 
 The staged diff, its instruction, and its context files. It can open and search any file in the working tree (unstaged edits included), but can't change anything or run commands. In an eval it sees the case's snapshot instead of the repo.
 
+A file `.gitattributes` marks `linguist-generated` (`convex/_generated/** linguist-generated`) shows in the diff as one line, how many lines it added and removed, never its contents. GitHub collapses the same files in pull requests. A commit that only changes generated files isn't judged.
+
 ## Versions
 
 A new instruction is a new version (`reviewers edit <name> --instruction "…"`). Nothing else makes one: name, paths, model, scope and context files change in place. `reviewers show <name> --json` lists every version that judged something, with its instruction, when it was first used and how many decisions it made (the text output lists the versions when there's more than one; the current instruction is always shown); every eval batch keeps its version too (`reviewers evals <name>`). There's no rollback command: to go back, edit the instruction to the earlier text, which makes a new version.
@@ -538,7 +540,7 @@ Jev is an evaluation model by TypeSafe: it answers closed questions with a proba
 
 A cheap first pass before the reviewer sessions. On each commit, one call to Jev, an evaluation model, asks about every Reviewer at once: does this change break the rule? Jev answers each with a probability. A Reviewer scored under its cutoff is approved without a session (cleared); the others run as usual.
 
-The classifier never blocks a commit: a high score only means the Reviewer runs. When it can't answer (an error, a timeout, a file too large to read whole), every Reviewer runs in full.
+The classifier never blocks a commit: a high score only means the Reviewer runs. A file too large to read whole is read in pieces. When it can't answer (an error, a timeout, a change too large even in pieces), every Reviewer runs in full.
 
 ## Connect
 
