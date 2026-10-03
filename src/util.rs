@@ -127,7 +127,7 @@ mod tests {
     fn slugs_are_readable_handles() {
         assert_eq!(slugify("No type casts"), "no-type-casts");
         assert_eq!(slugify("  Errors reach users — via the map!"), "errors-reach-users-via-the-map");
-        assert_eq!(slugify("Robux is never R$"), "robux-is-never-r");
+        assert_eq!(slugify("Prices are never in $"), "prices-are-never-in");
     }
 
     #[test]

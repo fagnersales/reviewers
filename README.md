@@ -12,7 +12,7 @@ curl -fsSL https://reviewers.sh/install | sh
 
 The first run reads your Claude Code sessions, finds the rules you keep repeating to your agents, and turns them into Reviewers. Run it again any time with `reviewers onboard`.
 
-Requires `git` and [Claude Code](https://claude.com/claude-code). Reviewers run on your own Claude Code; nothing is sent anywhere else, and everything is stored in `~/.reviewers/`.
+Requires `git` and [Claude Code](https://claude.com/claude-code). Reviewers run on your own Claude Code, and everything is stored in `~/.reviewers/`. Nothing is sent anywhere else, unless you connect the optional classifier (`reviewers help classifier`), which sends each commit's diff to Jev.
 
 ## Use
 
@@ -25,6 +25,10 @@ reviewers help          # everything else
 reviewers upgrade       # update to the latest release
 ```
 
+## License
+
+The Fira Code font in `site/fonts` is under the SIL Open Font License; see `site/fonts/OFL.txt`.
+
 ## Develop
 
 ```sh
@@ -32,5 +36,3 @@ cargo build
 cargo test
 scripts/release.sh      # release binaries and dist/latest.txt
 ```
-
-Moving from Personal Workspace: `reviewers import` brings over Reviewers, history and eval cases; `reviewers import --hooks` also switches the repos' git hooks.
