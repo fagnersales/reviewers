@@ -34,5 +34,5 @@ The Fira Code font in `site/fonts` is under the SIL Open Font License; see `site
 ```sh
 cargo build
 cargo test
-scripts/release.sh      # release binaries and dist/latest.txt
+scripts/release.sh "note" # tag the version in Cargo.toml; CI builds and publishes it
 ```
