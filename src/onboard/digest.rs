@@ -213,14 +213,21 @@ fn render_messages(messages: &[HumanMessage]) -> String {
 /// First-fit decreasing: big stretches each take an agent and small repos
 /// share one. Bins never pack perfectly, so the share grows until the run is
 /// a single wave; a second wave would double the wait.
-pub fn write_jobs(directory: &Path, repos: &[&RepoSummary], agents: usize) -> Result<Vec<Job>, String> {
+pub fn write_jobs(directory: &Path, repos: &[&RepoSummary], agents: usize, per_project: bool) -> Result<Vec<Job>, String> {
     let total: usize = repos.iter().map(|repo| message_bytes(&repo.messages)).sum();
     let mut share = total.div_ceil(agents.max(1)).clamp(MIN_SHARE_BYTES, MAX_SHARE_BYTES);
     let stretches = |share: usize| repos.iter().flat_map(|repo| stretches_of(repo, share)).collect::<Vec<_>>();
-    let mut bins = pack(stretches(share), share);
+    let grouped = |share: usize| {
+        if per_project {
+            repos.iter().flat_map(|repo| pack(stretches_of(repo, share), share)).collect::<Vec<_>>()
+        } else {
+            pack(stretches(share), share)
+        }
+    };
+    let mut bins = grouped(share);
     while bins.len() > agents && share < MAX_SHARE_BYTES {
         share = ((share as f64 * 1.1).ceil() as usize).min(MAX_SHARE_BYTES);
-        bins = pack(stretches(share), share);
+        bins = grouped(share);
     }
     let mut jobs = Vec::new();
     for (index, bin) in bins.into_iter().enumerate() {
@@ -303,5 +310,28 @@ pub fn scope_sentence(job: &Job) -> String {
                 .collect::<Vec<_>>()
                 .join(", ")
         ),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn project_context_keeps_extraction_jobs_separate() {
+        let folder = std::env::temp_dir().join(crate::util::new_id("reviewers-context-jobs"));
+        std::fs::create_dir_all(&folder).unwrap();
+        let summaries: Vec<RepoSummary> = ["api", "web"].iter().map(|name| RepoSummary {
+            name: (*name).into(), root: folder.join(name), since: "2026-01-01T00:00:00.000Z".into(),
+            messages: vec![HumanMessage { at: "2026-01-02T00:00:00.000Z".into(), text: "Always do this.".into() }],
+            corrections: 1, commits: Vec::new(), rule_files: Vec::new(),
+        }).collect();
+        let refs: Vec<&RepoSummary> = summaries.iter().collect();
+        let pooled = write_jobs(&folder.join("pooled"), &refs, 8, false).unwrap();
+        let separate = write_jobs(&folder.join("separate"), &refs, 8, true).unwrap();
+        assert_eq!(pooled.len(), 1);
+        assert_eq!(separate.len(), 2);
+        assert!(separate.iter().all(|job| job.stretches.iter().map(|stretch| &stretch.repo).collect::<std::collections::HashSet<_>>().len() == 1));
+        std::fs::remove_dir_all(folder).unwrap();
     }
 }
