@@ -358,6 +358,9 @@ pub fn commit_msg(message_file: Option<&str>) -> i32 {
     match review::record(&mut store, &project, RunKind::Review, judged, &diff, attempted, started_at, started) {
         Ok(reviewed) => {
             eprintln!("{}", review::terminal::report(&reviewed.run, &paint));
+            if let Some(update) = crate::upgrade::available(&store) {
+                eprintln!("{}", paint.dim(&update.line()));
+            }
             reviewed.exit_code
         }
         Err(error) => {

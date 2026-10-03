@@ -19,6 +19,7 @@ pub fn status(json_output: bool) -> Outcome {
             "reviewers": reviewers.iter().map(|r| json!({ "name": r.name, "slug": r.slug, "enabled": r.enabled, "scope": r.scope })).collect::<Vec<_>>(),
             "hooks": hooks.iter().map(|(hook, state)| json!({ "hook": hook, "state": state.map(|state| format!("{state:?}").to_lowercase()) })).collect::<Vec<_>>(),
             "classifier": crate::classifier::connected().map(|connection| connection.provider),
+            "update": crate::upgrade::available(&store).map(|update| json!({ "current": env!("CARGO_PKG_VERSION"), "latest": update.latest, "notes": update.notes })),
             "recentRuns": runs,
         }));
     }
@@ -32,6 +33,9 @@ pub fn status(json_output: bool) -> Outcome {
     match crate::classifier::connected() {
         Some(connection) => println!("{}", ui::dim(&format!("Classifier: {} · `reviewers classifier` for its cutoffs", connection.provider.label()))),
         None => println!("{}", ui::dim("No classifier: every Reviewer runs a session. `reviewers help classifier`")),
+    }
+    if let Some(update) = crate::upgrade::available(&store) {
+        println!("{}", ui::yellow(&update.line()));
     }
     println!();
     for reviewer in reviewers.iter().filter(|reviewer| reviewer.enabled) {

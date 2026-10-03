@@ -38,6 +38,10 @@ The classifier is optional. It asks Jev, TypeSafe's evaluation model, which Revi
 
 Everything lives in `~/.reviewers/reviewers.sqlite` on this machine. Diffs go to the model through the person's own Claude Code, and, when a classifier is connected, to its provider.
 
+## Updates
+
+Once a day, in the background, `reviewers` looks for a newer release. When there is one, it says so after every commit review, at the top of this guide, and in `reviewers status` (`update` in `--json`). Then run `reviewers upgrade` between tasks, never while a commit is waiting on its review, and tell the person what changed: `reviewers upgrade --check` prints the release notes. An upgrade checks the download's checksum and keeps every Reviewer, setting and review; it refreshes the skill and the hooks itself.
+
 ## Environment, files and exit codes
 
 `reviewers` with no command starts the first run when there are no Reviewers yet (in a terminal), shows this repo's status inside a judged repo, and prints the help anywhere else.
@@ -48,7 +52,8 @@ Environment variables:
 - `REVIEWERS_FRESH=1`: judge again even code that was judged before, instead of giving the earlier verdict back. Only when the person asks.
 - `REVIEWERS_HOME`: where everything is kept, instead of `~/.reviewers`. To move existing data: move the whole folder; set the variable wherever commits happen (the hooks read it from the committing shell); if `bin/reviewers` moved with it, fix the PATH line the installer added (marked `# added by reviewers`); then, if the global hooks were on, run `reviewers hooks install --global` again, and run `reviewers hooks install --all` for repos with their own install, so every hook calls the program where it now is. Settings, including the global hooks folder that was set before, live in `reviewers.sqlite` and move with it.
 - `REVIEWERS_TRACE_DIR`: keeps every Claude session's raw output stream there, one `.jsonl` file each, for a review that ended without an answer: `REVIEWERS_TRACE_DIR=/tmp/reviewers-trace git commit …`.
-- `REVIEWERS_RELEASES_URL`: where `reviewers upgrade` and the installer read the release manifest, instead of `https://reviewers.sh/releases/latest.txt`.
+- `REVIEWERS_RELEASES_URL`: where `reviewers upgrade`, the daily check and the installer read the release manifest, instead of `https://reviewers.sh/releases/latest.txt`.
+- `REVIEWERS_NO_UPDATE_CHECK=1`: no daily look for a newer release.
 - `REVIEWERS_NO_ONBOARD=1`: the installer doesn't start the first run.
 - `NO_COLOR`: plain text, no colors.
 - `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `XDG_CONFIG_HOME`: where `reviewers skill install` finds Claude Code, Codex and OpenCode.
@@ -330,7 +335,7 @@ Take the skill away from every agent
 
 Update reviewers to the latest release
 
-  --check: Only say whether a newer release exists
+  --check: Only say whether a newer release exists, and its notes
 
 ### `reviewers help`
 

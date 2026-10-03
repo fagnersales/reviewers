@@ -87,7 +87,16 @@ pub fn command_reference() -> String {
 
 pub fn run(args: HelpArgs) -> Outcome {
     if args.agent {
-        println!("{}\n\n{}", AGENT_GUIDE.trim_end().replace("{{VERSION}}", env!("CARGO_PKG_VERSION")), command_reference());
+        let guide = AGENT_GUIDE.trim_end().replace("{{VERSION}}", env!("CARGO_PKG_VERSION"));
+        let guide = match crate::store::Store::open_default().ok().and_then(|store| crate::upgrade::available(&store)) {
+            Some(update) => {
+                let notes: String = update.notes.iter().map(|note| format!("\n- {note}")).collect();
+                let (title, rest) = guide.split_once('\n').unwrap_or((guide.as_str(), ""));
+                format!("{title}\n\n**Update available.** {}{notes}\n{rest}", update.line())
+            }
+            None => guide,
+        };
+        println!("{guide}\n\n{}", command_reference());
         println!("\n## Topics\n");
         for (name, summary, _) in TOPICS {
             println!("- `reviewers help {name}`: {summary}");
