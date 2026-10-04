@@ -158,7 +158,7 @@ pub fn percent(probability: f64) -> String {
     format!("{:.0}%", probability * 100.0)
 }
 
-/// Approved without a session: the classifier put the chance the Reviewer should look under the cutoff.
+/// Approved without a session: the classifier put the chance of a broken rule under the cutoff.
 fn cleared(reviewer: &Reviewer, note: Classified) -> Decision {
     let probability = note.probability.unwrap_or_default();
     Decision {
@@ -169,8 +169,8 @@ fn cleared(reviewer: &Reviewer, note: Classified) -> Decision {
         reviewer_version: reviewer.version,
         instruction: reviewer.instruction.clone(),
         verdict: Verdict::Approved,
-        summary: format!("Cleared by the classifier: a {} chance this change is something the rule is about, under the {} cutoff.", percent(probability), percent(note.cutoff)),
-        reasoning: "No reviewer session ran: the classifier judged that nothing in the change is something this rule is about.".into(),
+        summary: format!("Cleared by the classifier: a {} chance a line this change adds breaks the rule, under the {} cutoff.", percent(probability), percent(note.cutoff)),
+        reasoning: "No reviewer session ran: the classifier judged the added lines unlikely to break this rule, or the rule not to concern them.".into(),
         evidence: Vec::new(),
         session: Value::Array(Vec::new()),
         model: None,
