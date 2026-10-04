@@ -92,7 +92,7 @@ impl RunKind {
     }
 }
 
-/// Whether the classifier may clear a Reviewer, and under what chance of a broken rule.
+/// Whether the classifier may clear a Reviewer, and under what chance the change is something its rule is about.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ClassifierUse {
     /// The cutoff set with `reviewers classifier cutoff`.

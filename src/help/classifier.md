@@ -2,7 +2,7 @@
 
 Jev is an evaluation model by TypeSafe: it answers closed questions with a probability, cheaply and fast. SystemOne is TypeSafe's API for it.
 
-A cheap first pass before the reviewer sessions. On each commit, one call to Jev, an evaluation model, asks about every Reviewer at once: does this change break the rule? Jev answers each with a probability. A Reviewer scored under its cutoff is approved without a session (cleared); the others run as usual.
+A cheap first pass before the reviewer sessions. On each commit, one call to Jev, an evaluation model, asks about every Reviewer at once: should this Reviewer review this change? Not whether the rule is broken, only whether the change holds anything the rule is about: a rule on TypeScript types has nothing to check in a change to a README. Jev answers each with a probability. A Reviewer scored under its cutoff is approved without a session (cleared); the others run as usual.
 
 The classifier never blocks a commit: a high score only means the Reviewer runs. A file too large to read whole is read in pieces. When it can't answer (an error, a timeout, a change too large even in pieces), every Reviewer runs in full.
 
@@ -17,7 +17,7 @@ The key comes from a hidden prompt, or from stdin, best from a file or a passwor
 
 ## Cutoffs
 
-The default cutoff is 15%: a Reviewer is cleared when Jev puts the chance of a broken rule under 15%. Replayed over 183 real commits, that skipped about half the sessions and missed none of 30 blocks; 25% missed 3. Change it with `reviewers classifier cutoff 0.2`. One Reviewer can have its own, `reviewers edit <name> --classifier 0.1`, or never be cleared, `--classifier off`. Use `off` for a rule the diff alone can't settle, one that depends on files the change doesn't show.
+The default cutoff is 15%: a Reviewer is cleared when Jev puts the chance that the change is something its rule is about under 15%. Replayed over 183 real commits, that skipped about half the sessions and missed none of 30 blocks; 25% missed 3. Change it with `reviewers classifier cutoff 0.2`. One Reviewer can have its own, `reviewers edit <name> --classifier 0.1`, or never be cleared, `--classifier off`. Use `off` for a rule the diff alone can't settle, one that depends on files the change doesn't show.
 
 ## Measure it
 

@@ -1,7 +1,8 @@
 //! The classifier: a cheap first pass that clears the Reviewers a change can't concern, so they
 //! don't start a reviewer session. It asks Jev, an evaluation model, one closed question per
-//! Reviewer in a single call: does this change break the rule? An answer under the Reviewer's
-//! cutoff clears it. The classifier never blocks: a high score, or any failure, and the Reviewer
+//! Reviewer in a single call: should this Reviewer review this change at all? Not whether the
+//! rule is broken, only whether the change holds anything the rule is about. An answer under the
+//! Reviewer's cutoff clears it. The classifier never blocks: a high score, or any failure, and the Reviewer
 //! runs as usual.
 
 use crate::util::data_dir;
@@ -134,7 +135,7 @@ fn write_private(path: &std::path::Path, text: &str) -> std::io::Result<()> {
 pub struct Classified {
     pub provider: Provider,
     pub outcome: Outcome,
-    /// The chance the change breaks the rule; none when the classifier couldn't answer.
+    /// The chance the Reviewer should review the change; none when the classifier couldn't answer.
     pub probability: Option<f64>,
     pub cutoff: f64,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -161,14 +162,15 @@ pub struct Question<'a> {
 }
 
 pub struct Scores {
-    /// Per question id, the chance the change breaks the rule.
+    /// Per question id, the chance the Reviewer should review the change.
     pub probabilities: BTreeMap<String, f64>,
     pub duration_ms: u64,
     pub tokens: u64,
 }
 
-const BREAKS: &str = "The change breaks the rule.";
-const KEEPS: &str = "The change keeps the rule, or the rule doesn't concern it.";
+const TASK: &str = "A code Reviewer enforces one rule on every commit. Decide whether this Reviewer should review this change: whether the change holds anything the rule is about. Don't judge whether the rule is broken, only whether the Reviewer has something to check.";
+const REVIEW: &str = "The change holds code, text or files the rule is about, so the Reviewer has something to check.";
+const SKIP: &str = "Nothing in the change is something the rule is about, so the Reviewer has nothing to check.";
 
 /// The change in pieces the model takes whole, files packed together where they fit.
 fn change_chunks(diff: &str) -> Result<Vec<String>, String> {
@@ -234,17 +236,18 @@ fn request_body(provider: Provider, repository: &str, change: &str, questions: &
             let asked = match provider {
                 Provider::Jev => json!({
                     "type": "choice",
-                    "instructions": format!("A code Reviewer enforces one rule on every commit.\n\nRule: {}\n{}\n\nDoes this change break the rule?", question.name, question.instruction),
-                    "criteria": { "pass": KEEPS, "fail": BREAKS },
+                    "instructions": format!("{TASK}\n\nRule: {}\n{}\n\nShould this Reviewer review this change?", question.name, question.instruction),
+                    // `fail` is the answer that sends the change to the Reviewer.
+                    "criteria": { "pass": SKIP, "fail": REVIEW },
                 }),
                 Provider::Gateway => json!({
                     "type": "boolean",
                     "instructions": {
-                        "task": "A code Reviewer enforces one rule on every commit. Decide whether this change breaks the rule.",
+                        "task": TASK,
                         "rule": question.name,
                         "instruction": question.instruction,
                     },
-                    "criteria": { "true": BREAKS, "false": KEEPS },
+                    "criteria": { "true": REVIEW, "false": SKIP },
                 }),
             };
             (question.id.clone(), asked)
@@ -256,7 +259,7 @@ fn request_body(provider: Provider, repository: &str, change: &str, questions: &
     }
 }
 
-/// Each answer as the chance the change breaks the rule, plus the tokens the call used.
+/// Each answer as the chance the Reviewer should review the change, plus the tokens the call used.
 fn read_answers(provider: Provider, body: &Value, questions: &[Question]) -> Result<(Vec<(String, f64)>, u64), String> {
     // Cloudflare-hosted SystemOne models wrap the answers in `result`.
     let answers = body.get("answers").or_else(|| body.pointer("/result/answers")).ok_or("the classifier's answer has no answers")?;
@@ -377,18 +380,18 @@ mod tests {
         let jev = request_body(Provider::Jev, "acme", "diff", &questions());
         assert_eq!(jev["model"], "jev-latest");
         assert_eq!(jev["questions"]["r0"]["type"], "choice");
-        assert_eq!(jev["questions"]["r0"]["criteria"]["fail"], BREAKS);
+        assert_eq!(jev["questions"]["r0"]["criteria"]["fail"], REVIEW);
         assert!(jev["questions"]["r1"]["instructions"].as_str().unwrap().contains("Spell out names"));
 
         let gateway = request_body(Provider::Gateway, "acme", "diff", &questions());
         assert!(gateway.get("model").is_none());
         assert_eq!(gateway["questions"]["r0"]["type"], "boolean");
-        assert_eq!(gateway["questions"]["r0"]["criteria"]["true"], BREAKS);
+        assert_eq!(gateway["questions"]["r0"]["criteria"]["true"], REVIEW);
         assert_eq!(gateway["state"]["change"], "diff");
     }
 
     #[test]
-    fn reads_answers_as_the_chance_of_breaking_the_rule() {
+    fn reads_answers_as_the_chance_the_reviewer_should_review() {
         let jev = json!({ "answers": { "r0": { "type": "choice", "choice": "pass", "confidence": 0.9 }, "r1": { "type": "choice", "choice": "fail", "confidence": 0.7 } } });
         let (scored, _) = read_answers(Provider::Jev, &jev, &questions()).unwrap();
         assert!((scored[0].1 - 0.1).abs() < 1e-9 && (scored[1].1 - 0.7).abs() < 1e-9);

@@ -81,7 +81,7 @@ fn status(json_output: bool) -> Outcome {
         return Ok(0);
     };
     println!("{} {}", ui::bold(connection.provider.label()), ui::dim(&format!("· key {}", connection.key_hint())));
-    println!("Default cutoff {}: a Reviewer is cleared when the chance the change breaks its rule is under it.", ui::bold(&percent(default)));
+    println!("Default cutoff {}: a Reviewer is cleared when the chance the change is something its rule is about is under it.", ui::bold(&percent(default)));
     let own: Vec<String> = reviewers
         .iter()
         .filter_map(|reviewer| match reviewer.classifier {
