@@ -1,4 +1,4 @@
-# Reviewers 0.3.2: guide for coding agents
+# Reviewers 0.4.0: guide for coding agents
 
 Reviewers are the person's rules about code, checked on every commit. Each Reviewer is one rule. A git `commit-msg` hook runs every Reviewer that applies to the staged diff, all at once, each as its own read-only Claude Code or Codex session. If any blocks, the commit stops and the hook prints, for each block, the file and lines, what is wrong, and what the code should do instead.
 
