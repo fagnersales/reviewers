@@ -1,0 +1,21 @@
+[
+  { "query": "Why did you cast the response with `as User`? No, I don't want casts on data from the API. Validate it with the zod schema instead.", "should_trigger": true, "why": "rejects a cast the agent added" },
+  { "query": "undo that. I never want errors swallowed in an empty catch block, let them bubble up", "should_trigger": true, "why": "rejects swallowed errors" },
+  { "query": "Stop abbreviating names. `usr`, `cfg`, `btnRef`... spell them out like I keep asking and rename what you just wrote.", "should_trigger": true, "why": "a correction that keeps coming back" },
+  { "query": "no, revert the new StatusPill component you made, we already have Badge in components/ui. use that", "should_trigger": true, "why": "rejects a duplicated component" },
+  { "query": "Não, não quero `any` aqui. Tira isso e tipa direito o retorno da função que você acabou de escrever.", "should_trigger": true, "why": "a rejection in Portuguese" },
+  { "query": "That's wrong: you put the business logic straight in the route handler. It belongs in the service layer. Move it.", "should_trigger": true, "why": "rejects where code was put" },
+  { "query": "I didn't ask you to add console.log everywhere. Remove them and use the logger.", "should_trigger": true, "why": "rejects something the agent did unasked" },
+  { "query": "My commit was blocked: 'No type casts' blocked src/api/client.ts lines 40-44. Fix it and commit again.", "should_trigger": true, "why": "a commit blocked by Reviewers" },
+  { "query": "From now on, every Convex mutation has to check the caller's store access first. Make sure that's enforced on every commit.", "should_trigger": true, "why": "states a rule to enforce on commits" },
+  { "query": "Which of my reviewers block the most, and are any of them never catching anything?", "should_trigger": true, "why": "asks how the Reviewers are doing" },
+
+  { "query": "Looks great, thanks. Commit it with a short message.", "should_trigger": false, "why": "approves the work" },
+  { "query": "Add @marina as a reviewer on PR 214 and request her review.", "should_trigger": false, "why": "a GitHub PR reviewer, not a Reviewer" },
+  { "query": "Can you review this PR for bugs before I merge it? gh pr 88", "should_trigger": false, "why": "a code review request" },
+  { "query": "The pre-commit hook fails because prettier isn't installed. Fix the husky setup.", "should_trigger": false, "why": "a commit hook that isn't Reviewers" },
+  { "query": "Rename the button label from 'Save' to 'Save changes' in the settings form.", "should_trigger": false, "why": "a fresh request, nothing rejected" },
+  { "query": "The tests fail on CI with 'cannot find module @/lib/env'. Can you figure out why?", "should_trigger": false, "why": "a failure that isn't a rejection" },
+  { "query": "Set up ESLint with the no-explicit-any rule for this project.", "should_trigger": false, "why": "a lint rule, which the person asked for directly" },
+  { "query": "What's the difference between `as const` and `satisfies` in TypeScript?", "should_trigger": false, "why": "a question about code, nothing to enforce" }
+]

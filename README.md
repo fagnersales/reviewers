@@ -47,5 +47,6 @@ The Fira Code font in `site/fonts` is under the SIL Open Font License; see `site
 ```sh
 cargo build
 cargo test
+scripts/skill-eval.py      # when agents open the skill: real Claude Code sessions on your account
 scripts/release.sh "note" # tag the version in Cargo.toml; CI builds and publishes it
 ```
