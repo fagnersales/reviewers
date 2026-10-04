@@ -1,4 +1,4 @@
-# Reviewers 0.3.1: guide for coding agents
+# Reviewers 0.3.2: guide for coding agents
 
 Reviewers are the person's rules about code, checked on every commit. Each Reviewer is one rule. A git `commit-msg` hook runs every Reviewer that applies to the staged diff, all at once, each as its own read-only Claude Code or Codex session. If any blocks, the commit stops and the hook prints, for each block, the file and lines, what is wrong, and what the code should do instead.
 
@@ -21,6 +21,10 @@ A commit that ends "could not reach a verdict" means a Reviewer crashed or timed
 2. Check whether a linter can enforce it (an ESLint rule, a TypeScript flag). If so, propose that instead: it's instant and uses no tokens.
 3. Otherwise write it: `reviewers new --name "…" --instruction "…"` (this repo) or with `--everywhere` (a personal rule for every repo). Add `--paths` when it only concerns part of the repo. `reviewers help writing` covers the instruction.
 4. Give it cases, at least one diff it must block and one it must approve, and run the evals before calling it done (`reviewers help evals`).
+
+## When the person rejects something you did
+
+"No, don't cast that", "undo it", "use the Badge we have": a correction is a rule the person may want checked on every commit. Don't stop to ask. Do what the correction asks and finish the task; then, in your final message, ask whether they want a Reviewer for it, with the rule named as it would be ("No type casts on API data"). If `reviewers list --all --json` shows a Reviewer that already covers it, say which one instead. When they say yes, it's a stated rule: follow the steps above.
 
 ## When asked to find new Reviewers
 
