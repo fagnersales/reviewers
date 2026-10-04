@@ -1,6 +1,6 @@
 ---
 name: reviewers
-description: Reviewers check every commit against the person's rules and stop commits that break them. Use when a commit is blocked by Reviewers, when the person states a rule about code or asks to add, change, tune, remove or check a Reviewer, or asks how their Reviewers are doing. Also use every time the person rejects or corrects something you did, in any language ("no, don't do that", "undo it", "use X, not Y", "why did you…"): keep working, and offer in your final message to make that correction a Reviewer. Not for other commit hooks (husky, lint-staged), lint setup, or pull request reviews.
+description: Reviewers check every commit against the person's rules and stop commits that break them. Use when a commit is blocked by Reviewers, when the person states a rule about code or asks to add, change, tune, remove or check a Reviewer, or asks how their Reviewers are doing. Also use every time the person rejects or corrects something you did, however short or soft, in any language ("no", "undo it", "start over", "use X, not Y", "why did you…", "I'd rather you didn't…"): keep working, and offer in your final message to make that correction a Reviewer. Not for other commit hooks (husky, lint-staged), lint or compiler setup, pull request reviews, or writing about code review.
 ---
 
 <!-- managed by reviewers: `reviewers skill install` rewrites this file -->
