@@ -10,7 +10,7 @@ Each Reviewer is one rule ("no type casts", "errors reach users through the erro
 curl -fsSL https://reviewers.sh/install | sh
 ```
 
-The first run reads your Claude Code and Codex sessions, finds the rules you keep repeating to your agents, and turns them into Reviewers. Onboarding lets you pool evidence from all selected projects or keep it separate for each project (`--context all|project`); `reviewers suggest` keeps that choice. Later runs read only sessions that have not already been sent to agents; `--reread` explicitly reads them again.
+The first run reads your Claude Code and Codex sessions, finds the rules you keep repeating to your agents, and turns them into Reviewers. Onboarding and `reviewers suggest` either pool evidence from all selected projects or keep it separate for each project: pick each run, pass `--context all|project`, or set a default with `reviewers context`. Later runs read only sessions that have not already been sent to agents; `--reread` explicitly reads them again.
 
 Requires `git` and either [Claude Code](https://claude.com/claude-code) or [Codex CLI](https://developers.openai.com/codex/cli/), installed and signed in. Reviewers run through your selected CLI, and everything is stored in `~/.reviewers/`. Nothing is sent anywhere else, unless you connect the optional classifier (`reviewers help classifier`), which sends each commit's diff to Jev.
 

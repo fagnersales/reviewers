@@ -9,6 +9,9 @@ pub struct SuggestArgs {
     /// Read every session in the window again, even the ones already read.
     #[arg(long)]
     pub reread: bool,
+    /// Pool evidence from all selected repos, or keep each project's evidence separate, for this run (skips the picker). Defaults to `reviewers context`.
+    #[arg(long, value_enum)]
+    pub context: Option<super::onboard::ContextScope>,
     /// Only these repos, by folder name, comma-separated.
     #[arg(long)]
     pub repos: Option<String>,

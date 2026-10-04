@@ -89,7 +89,7 @@ Read your agent sessions and turn the rules you keep repeating into Reviewers
 
   --since <SINCE>: How far back to read, in days (default: 90)
   --repos <REPOS>: Only these repos, by folder name, comma-separated (skips the repo picker)
-  --context <CONTEXT>: Pool evidence from all selected repos, or keep each project's evidence separate (skips the picker); one of `all`, `project`
+  --context <CONTEXT>: Pool evidence from all selected repos, or keep each project's evidence separate, for this run (skips the picker). Defaults to `reviewers context`; one of `all`, `project`
   --reread: Read sessions in the window again, including ones already read
   --model <MODEL>: The model for extraction and merging: a Claude id/alias, `codex:<model>` or `codex` (skips the picker)
   --parallel <PARALLEL>: Agents running at once (default: 8)
@@ -104,6 +104,7 @@ Read only the sessions since the last read and suggest new Reviewers, each with 
 
   --since <SINCE>: How far back to read at most, in days (default: 90)
   --reread: Read every session in the window again, even the ones already read
+  --context <CONTEXT>: Pool evidence from all selected repos, or keep each project's evidence separate, for this run (skips the picker). Defaults to `reviewers context`; one of `all`, `project`
   --repos <REPOS>: Only these repos, by folder name, comma-separated
   --model <MODEL>: The model the agents run on: a Claude id or alias, `codex`, or `codex:<model-id>`. Defaults to the one you used most lately
   --parallel <PARALLEL>: Agents running at once (default: 8)
@@ -308,6 +309,12 @@ Show or set the model Reviewers run on. A Reviewer's own model (`edit --model`) 
   <MODEL>: A Claude id/alias (sonnet, opus), `codex:<model>` or `codex` for Codex's default. `default` clears this level. Omit to print the current one
   --repo: For the repo you're in only
 
+### `reviewers context`
+
+Show or set the default context for onboarding and `suggest`: pool evidence from all selected repos, or keep each project's separate. Unset, they ask each time, and need --context without a terminal
+
+  <CONTEXT>: `all`, `project`, or `default` to clear it. Omit to print the current one; one of `all`, `project`, `default`
+
 ### `reviewers classifier status`
 
 What's connected, the cutoffs, and what it cleared lately
@@ -468,7 +475,7 @@ A rule must have come up at least twice, or have been stated as a standing rule 
 
 At the end the person picks which Reviewers start on, and the global hooks are installed so every repo runs them, with each repo's own hooks still running first. Everything found, and every piece of evidence, is kept in `onboard/<date>/` in the data folder (`~/.reviewers`, or `REVIEWERS_HOME`).
 
-The merge is shown the relevant Reviewers that already exist and leaves out a rule one of them already checks, even in other words; a suggestion with the same name as an existing Reviewer in its scope, ignoring case, is skipped too. `--context all|project` sets the context choice without a picker. The choice is saved for later `reviewers suggest` runs. `--since`, `--repos` and `--model` narrow it; `reviewers onboard --help` lists the rest.
+The merge is shown the relevant Reviewers that already exist and leaves out a rule one of them already checks, even in other words; a suggestion with the same name as an existing Reviewer in its scope, ignoring case, is skipped too. `--context all|project` sets the context for one run without a picker; `reviewers context all|project` sets a default for onboarding and `suggest`, and `reviewers context default` clears it. With neither, the person picks each time, and without a terminal `--context` is required. `--since`, `--repos` and `--model` narrow it; `reviewers onboard --help` lists the rest.
 
 ## Later: `reviewers suggest`
 

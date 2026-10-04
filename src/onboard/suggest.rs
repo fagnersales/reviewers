@@ -105,7 +105,7 @@ pub fn run(args: SuggestArgs) -> Outcome {
         return Err("suggestions come from Claude Code or Codex, and neither `claude` nor `codex` is on this machine's PATH".into());
     }
     let store = Store::open_default()?;
-    let per_project = store.setting("onboard_context")?.as_deref() == Some("project");
+    let preset = preset_context(&store, args.context, interactive)?;
     let state = State::load();
     let started = Instant::now();
     let now = Utc::now();
@@ -144,6 +144,12 @@ pub fn run(args: SuggestArgs) -> Outcome {
         ui::outro("Nothing new to read.");
         return Ok(0);
     }
+
+    let Some(context) = preset.or_else(pick_context) else {
+        ui::cancelled("Nothing was sent to an agent.");
+        return Ok(130);
+    };
+    let per_project = context == ContextScope::Project;
 
     let model: Option<String> = args.model.clone().or_else(|| model_choices(&scan.models, claude_installed, codex_installed).first().map(|(id, _)| id.clone()));
     let provider = agent::selection(model.as_deref()).0;
