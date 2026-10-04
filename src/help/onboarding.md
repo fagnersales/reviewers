@@ -10,7 +10,7 @@ A rule must have come up at least twice, or have been stated as a standing rule 
 
 At the end the person picks which Reviewers start on, and the global hooks are installed so every repo runs them, with each repo's own hooks still running first. Everything found, and every piece of evidence, is kept in `onboard/<date>/` in the data folder (`~/.reviewers`, or `REVIEWERS_HOME`).
 
-The merge is shown the relevant Reviewers that already exist and leaves out a rule one of them already checks, even in other words; a suggestion with the same name as an existing Reviewer in its scope, ignoring case, is skipped too. `--context all|project` sets the context choice without a picker. The choice is saved for later `reviewers suggest` runs. `--since`, `--repos` and `--model` narrow it; `reviewers onboard --help` lists the rest.
+The merge is shown the relevant Reviewers that already exist and leaves out a rule one of them already checks, even in other words; a suggestion with the same name as an existing Reviewer in its scope, ignoring case, is skipped too. `--context all|project` sets the context for one run without a picker; `reviewers context all|project` sets a default for onboarding and `suggest`, and `reviewers context default` clears it. With neither, the person picks each time, and without a terminal `--context` is required. `--since`, `--repos` and `--model` narrow it; `reviewers onboard --help` lists the rest.
 
 ## Later: `reviewers suggest`
 

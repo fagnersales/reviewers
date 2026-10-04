@@ -1,11 +1,53 @@
 use super::Outcome;
 use clap::{Args, ValueEnum};
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, ValueEnum)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
 pub enum ContextScope {
-    #[default]
     All,
     Project,
+}
+
+/// The default `reviewers context` sets; unset, onboarding and `suggest` ask each time.
+pub const CONTEXT_SETTING: &str = "context";
+
+impl ContextScope {
+    pub fn name(self) -> &'static str {
+        match self {
+            ContextScope::All => "all",
+            ContextScope::Project => "project",
+        }
+    }
+
+    pub fn from_name(name: &str) -> Option<Self> {
+        ContextScope::from_str(name, false).ok()
+    }
+
+    fn describe(self) -> &'static str {
+        match self {
+            ContextScope::All => "all selected projects, pooled",
+            ContextScope::Project => "each project separately",
+        }
+    }
+}
+
+pub fn context(value: Option<String>) -> Outcome {
+    let store = crate::store::Store::open_default()?;
+    match value.as_deref() {
+        Some("default") => {
+            store.set_setting(CONTEXT_SETTING, None)?;
+            println!("No default context: onboarding and `suggest` will ask, or need --context.");
+        }
+        Some(name) => {
+            let scope = ContextScope::from_name(name).ok_or_else(|| format!("unknown context `{name}`; use all, project or default"))?;
+            store.set_setting(CONTEXT_SETTING, Some(scope.name()))?;
+            println!("Default context: {}", scope.describe());
+        }
+        None => match store.setting(CONTEXT_SETTING)?.as_deref().and_then(ContextScope::from_name) {
+            Some(scope) => println!("{}", scope.describe()),
+            None => println!("(no default: onboarding and `suggest` ask, or need --context)"),
+        },
+    }
+    Ok(0)
 }
 
 #[derive(Args)]
@@ -16,7 +58,7 @@ pub struct OnboardArgs {
     /// Only these repos, by folder name, comma-separated (skips the repo picker).
     #[arg(long)]
     pub repos: Option<String>,
-    /// Pool evidence from all selected repos, or keep each project's evidence separate (skips the picker).
+    /// Pool evidence from all selected repos, or keep each project's evidence separate, for this run (skips the picker). Defaults to `reviewers context`.
     #[arg(long, value_enum)]
     pub context: Option<ContextScope>,
     /// Read sessions in the window again, including ones already read.

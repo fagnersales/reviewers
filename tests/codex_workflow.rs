@@ -101,7 +101,7 @@ printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":50,"cached_input
         json!({"type":"event_msg","timestamp":timestamp,"payload":{"type":"user_message","message":"Always validate input"}}),
     ];
     fs::write(codex.join("rollout.jsonl"), events.iter().map(Value::to_string).collect::<Vec<_>>().join("\n")).unwrap();
-    workspace.cli(&["onboard", "--yes", "--no-skill", "--model", "codex:test-model"]);
+    workspace.cli(&["onboard", "--yes", "--no-skill", "--context", "all", "--model", "codex:test-model"]);
     assert_eq!(workspace.cli(&["model"]).trim(), "codex:test-model");
     let reviewers: Value = serde_json::from_str(&workspace.cli(&["list", "--all", "--json"])).unwrap();
     assert!(reviewers.to_string().contains("Validate input"));

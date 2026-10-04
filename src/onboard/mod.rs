@@ -4,7 +4,7 @@ pub mod transcripts;
 
 use crate::agent::{self, Activity, Provider, Request, Tokens};
 use crate::commands::Outcome;
-use crate::commands::onboard::{ContextScope, OnboardArgs};
+use crate::commands::onboard::{CONTEXT_SETTING, ContextScope, OnboardArgs};
 use crate::store::{ClassifierUse, NewReviewer, Reviewer, Scope, Store};
 use crate::util::{compact, duration, home_path, plural, slugify, str_field, thousands};
 use crate::{git, hooks, skill, ui};
@@ -838,12 +838,38 @@ fn run_directory(kind: &str) -> Result<PathBuf, String> {
     Ok(directory)
 }
 
+/// The context set for this run: `--context`, else the default `reviewers context` set.
+/// None means the person picks; without a terminal one of the two is required.
+fn preset_context(store: &Store, flag: Option<ContextScope>, interactive: bool) -> Result<Option<ContextScope>, String> {
+    let preset = match flag {
+        Some(context) => Some(context),
+        None => store.setting(CONTEXT_SETTING)?.as_deref().and_then(ContextScope::from_name),
+    };
+    if preset.is_none() && !interactive {
+        return Err("pass --context all or --context project, or set a default with `reviewers context`".into());
+    }
+    Ok(preset)
+}
+
+fn pick_context() -> Option<ContextScope> {
+    let choices = [
+        ui::Choice { label: "All selected projects".into(), hint: "Pool evidence to find rules that apply everywhere".into() },
+        ui::Choice { label: "Each project separately".into(), hint: "Keep evidence and suggested Reviewers within each project".into() },
+    ];
+    match ui::select("How should Reviewers use project context?", &choices, 0)? {
+        0 => Some(ContextScope::All),
+        _ => Some(ContextScope::Project),
+    }
+}
+
 pub fn run(args: OnboardArgs) -> Outcome {
     let interactive = ui::interactive() && !args.yes;
     let live = ui::stdout_is_tty();
     let directory = run_directory("onboard")?;
     let started = Instant::now();
     let state = suggest::State::load();
+    let store = Store::open_default()?;
+    let preset = preset_context(&store, args.context, interactive)?;
 
     ui::intro(&format!("{} {}", ui::bold(&format!("{} reviewers", ui::LOGO)), ui::dim("· first run")));
     let spinner = ui::Spinner::start("Reading your agent sessions");
@@ -885,20 +911,9 @@ pub fn run(args: OnboardArgs) -> Outcome {
         return Ok(0);
     }
 
-    let context = match args.context {
-        Some(context) => context,
-        None if interactive => {
-            let choices = [
-                ui::Choice { label: "All selected projects".into(), hint: "Pool evidence to find rules that apply everywhere".into() },
-                ui::Choice { label: "Each project separately".into(), hint: "Keep evidence and suggested Reviewers within each project".into() },
-            ];
-            match ui::select("How should Reviewers use project context?", &choices, 0) {
-                Some(0) => ContextScope::All,
-                Some(_) => ContextScope::Project,
-                None => { ui::cancelled("Nothing was sent to an agent."); return Ok(130); }
-            }
-        }
-        None => ContextScope::All,
+    let Some(context) = preset.or_else(pick_context) else {
+        ui::cancelled("Nothing was sent to an agent.");
+        return Ok(130);
     };
 
     let claude_installed = agent::is_installed(Provider::Claude);
@@ -932,8 +947,6 @@ pub fn run(args: OnboardArgs) -> Outcome {
         let cli = match provider { Provider::Claude => "claude", Provider::Codex => "codex" };
         return Err(format!("onboarding needs `{cli}` on PATH for this model; install it and sign in, or choose another --model"));
     }
-    let store = Store::open_default()?;
-    store.set_setting("onboard_context", Some(if context == ContextScope::Project { "project" } else { "all" }))?;
 
     let (candidates, extract_tokens, failed) = extract(&jobs, args.parallel.max(1), model.as_deref(), live);
     let failed_roots: Vec<&Path> = failed.iter().flat_map(|&index| jobs[index].stretches.iter().map(|stretch| stretch.root.as_path())).collect();

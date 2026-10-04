@@ -168,6 +168,12 @@ pub enum Command {
         #[arg(long)]
         repo: bool,
     },
+    /// Show or set the default context for onboarding and `suggest`: pool evidence from all selected repos, or keep each project's separate. Unset, they ask each time, and need --context without a terminal.
+    Context {
+        /// `all`, `project`, or `default` to clear it. Omit to print the current one.
+        #[arg(value_parser = ["all", "project", "default"])]
+        context: Option<String>,
+    },
     /// The classifier: a cheap first pass that skips Reviewers a change can't concern. With no subcommand, the same as `status`.
     Classifier {
         #[command(subcommand)]
