@@ -1,4 +1,4 @@
-use crate::store::{Evidence, Run, Verdict};
+use crate::store::{Evidence, Run, RunKind, Verdict};
 use crate::util::{compact, duration};
 use std::io::IsTerminal;
 
@@ -12,6 +12,10 @@ pub struct Paint {
 impl Paint {
     pub fn for_stderr() -> Paint {
         Paint { on: std::io::stderr().is_terminal() && std::env::var_os("NO_COLOR").is_none() }
+    }
+
+    pub fn for_stdout() -> Paint {
+        Paint { on: std::io::stdout().is_terminal() && std::env::var_os("NO_COLOR").is_none() }
     }
 
     #[cfg(test)]
@@ -51,18 +55,41 @@ fn location(evidence: &Evidence) -> String {
     }
 }
 
-/// Written for the agent that made the commit: where, what, what to do, and how to see the rest.
+/// One line as each Reviewer finishes: its verdict and what it took.
+pub fn progress(judged: &super::Judged, paint: &Paint) -> String {
+    match &judged.outcome {
+        Ok(decision) => {
+            let mark = match (decision.verdict, judged.reviewer.blocking) {
+                (Verdict::Approved, _) => paint.green("✓"),
+                (_, true) => paint.red("✗"),
+                (_, false) => paint.yellow("✗"),
+            };
+            let cleared = decision.classifier.as_ref().filter(|note| note.outcome == crate::classifier::Outcome::Cleared);
+            let timing = match (&decision.reused_from, cleared) {
+                (Some(run), _) => format!("unchanged since {run}"),
+                (None, Some(note)) => format!("cleared by the classifier · {}", super::percent(note.probability.unwrap_or_default())),
+                (None, None) => duration(decision.duration_ms),
+            };
+            format!("  {mark} {} {}", judged.reviewer.name, paint.dim(&timing))
+        }
+        Err(_) => format!("  {} {} {}", paint.yellow("!"), judged.reviewer.name, paint.dim("no verdict")),
+    }
+}
+
+/// Written for the agent that made the commit (or ran the check): where, what, what to do, and how to see the rest.
 pub fn report(run: &Run, paint: &Paint) -> String {
+    let check = run.kind == RunKind::Check;
     let tokens: u64 = run.decisions.iter().map(|decision| decision.usage.tokens_read + decision.usage.tokens_written).sum();
     let footer = paint.dim(&format!("· {} · {} tokens", duration(run.duration_ms), compact(tokens)));
     let (blocked, advisory): (Vec<_>, Vec<_>) = run.decisions.iter().filter(|decision| decision.verdict == Verdict::Blocked).partition(|decision| !decision.advisory);
     let blocked_before = blocked.iter().any(|decision| decision.reused_from.is_some());
     let mut lines = Vec::new();
     if let Some(failure) = &run.failure {
-        lines.push(format!("{PREFIX} {}", paint.yellow("could not reach a verdict, so the commit is stopped")));
+        lines.push(format!("{PREFIX} {}", paint.yellow(if check { "could not reach a verdict" } else { "could not reach a verdict, so the commit is stopped" })));
         lines.extend(failure.lines().map(|line| format!("  {line}")));
         lines.push(String::new());
-        lines.push(format!("Try the commit again: only the Reviewers without a verdict run again. If it keeps failing: `reviewers run {}`.", run.id));
+        let again = if check { "Check again" } else { "Try the commit again" };
+        lines.push(format!("{again}: only the Reviewers without a verdict run again. If it keeps failing: `reviewers run {}`.", run.id));
         return lines.join("\n");
     }
     let finding = |lines: &mut Vec<String>, decision: &crate::store::Decision| {
@@ -102,7 +129,8 @@ pub fn report(run: &Run, paint: &Paint) -> String {
             finding(&mut lines, decision);
         }
         lines.push(String::new());
-        lines.push(format!("Advisory only: the commit went through. Full reasoning: `reviewers run {}`.", run.id));
+        let through = if check { "a commit of this change goes through" } else { "the commit went through" };
+        lines.push(format!("Advisory only: {through}. Full reasoning: `reviewers run {}`.", run.id));
         return lines.join("\n");
     }
     lines.push(format!(
@@ -116,6 +144,7 @@ pub fn report(run: &Run, paint: &Paint) -> String {
     if blocked_before {
         lines.push("The code and the Reviewer are unchanged since the last try, so it gave the same verdict without running again.".into());
     }
-    lines.push(format!("Fix the code above and commit again. Full reasoning: `reviewers run {}`.", run.id));
+    let next = if check { "check again, or commit" } else { "commit again" };
+    lines.push(format!("Fix the code above and {next}. Full reasoning: `reviewers run {}`.", run.id));
     lines.join("\n")
 }

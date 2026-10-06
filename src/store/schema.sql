@@ -46,7 +46,7 @@ CREATE TABLE reviewer_projects (
 CREATE TABLE runs (
   id TEXT PRIMARY KEY,
   project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-  kind TEXT NOT NULL CHECK (kind IN ('review', 'eval')),
+  kind TEXT NOT NULL CHECK (kind IN ('review', 'check', 'eval')),
   verdict TEXT NOT NULL CHECK (verdict IN ('approved', 'blocked')),
   failure TEXT,
   attempted_message TEXT,

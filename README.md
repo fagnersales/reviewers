@@ -33,6 +33,7 @@ You mostly don't. Your agent commits, Reviewers judge, your agent fixes. The ins
 
 ```sh
 reviewers               # this repo: its Reviewers and latest reviews
+reviewers check         # judge the change now; the commit of it reuses these verdicts
 reviewers stats         # what each Reviewer catches, the wait it adds, the tokens it uses
 reviewers help          # everything else
 reviewers upgrade       # update to the latest release

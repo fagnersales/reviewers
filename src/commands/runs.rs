@@ -69,7 +69,11 @@ fn print_runs(runs: &[crate::store::RunSummary], with_project: bool) {
             "{mark} {} {} {}",
             ui::dim(&format!("{when} {}", run.id)),
             ui::truncate(&message, 52),
-            ui::dim(&format!("· {project}{outcome} · {} · {} tokens{}", duration(run.duration_ms), compact(run.tokens), if run.kind == RunKind::Eval { " · eval" } else { "" }))
+            ui::dim(&format!("· {project}{outcome} · {} · {} tokens{}", duration(run.duration_ms), compact(run.tokens), match run.kind {
+                RunKind::Review => "",
+                RunKind::Check => " · check",
+                RunKind::Eval => " · eval",
+            }))
         );
     }
 }

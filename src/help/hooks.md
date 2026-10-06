@@ -1,5 +1,7 @@
 # What happens on a commit
 
+`reviewers check` runs the same judgement before the commit, and the commit of that same change gets its verdicts back without running: see `reviewers help --agent`.
+
 ## Which repos run Reviewers
 
 - **Every repo, with the global hooks.** `reviewers hooks install --global` points git's global `core.hooksPath` at `hooks/` in the data folder (`~/.reviewers`, or `REVIEWERS_HOME`), so every repo on the machine runs Reviewers, new repos and fresh clones included. With a global hooks folder, git no longer runs a repo's own hooks in `.git/hooks`, so each script there runs the repo's own hook of the same name first (`pre-commit`, `pre-push` and the rest), and a commit its own `commit-msg` refuses never reaches Reviewers. If another global hooks folder was set before, its hooks run instead of the repo's own, exactly as git ran them; `reviewers hooks uninstall --global` puts that setting back. A repo nobody added is registered on its first commit, if a Reviewer applies to every repo.

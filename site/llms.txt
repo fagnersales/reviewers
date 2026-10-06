@@ -13,6 +13,10 @@ You are the one who fixes, adds and tunes Reviewers. The person states rules; yo
 
 A commit that ends "could not reach a verdict" means a Reviewer crashed or timed out, not that the code is wrong. Retry once: only the Reviewers without a verdict run again. If it fails again, tell the person.
 
+## Before committing
+
+`reviewers check` judges the change now, as the commit would: every Reviewer that applies, against what `git add -A && git commit` would commit (`--staged` for only what's staged). It prints the same blocks and exits the way the hook would. A commit of exactly that change afterwards gets the same verdicts back without running, so checking first moves the wait rather than adding to it. Name Reviewers to run only those: `reviewers check "No type casts"`, for example to see whether a fix satisfies the one that blocked. Checks show in `reviewers runs`, marked `check`; `reviewers stats` counts a verdict once, whether a check or a commit reached it.
+
 ## When the person states a rule
 
 "Never cast types", "errors shown to users go through the error map", "dialogs, not pages":
@@ -115,6 +119,14 @@ Read only the sessions since the last read and suggest new Reviewers, each with 
 
 This repo: the Reviewers that judge it and its latest reviews
 
+  --json: Print JSON instead of text, for agents and scripts
+
+### `reviewers check`
+
+Judge the change now, before committing it: what a commit of it would get. Committing the same change afterwards reuses these verdicts
+
+  <REVIEWERS>: Only these Reviewers, by name, slug or id. Without any, every Reviewer the commit would run
+  --staged: Judge only what's staged, as `git commit` would, instead of everything `git add -A` would stage
   --json: Print JSON instead of text, for agents and scripts
 
 ### `reviewers list`
@@ -488,6 +500,8 @@ A rule seen only once waits in the same file and is suggested once it comes up a
 ---
 
 # What happens on a commit
+
+`reviewers check` runs the same judgement before the commit, and the commit of that same change gets its verdicts back without running: see `reviewers help --agent`.
 
 ## Which repos run Reviewers
 

@@ -125,6 +125,34 @@ pub fn staged_diff(root: &Path) -> Result<String, String> {
     ok(root, &["diff", "--cached", "--no-ext-diff"]).map(|diff| without_generated(root, &diff))
 }
 
+/// What `git add -A && git commit` would commit right now, untracked files included, read through a
+/// copy of the index so the real one is never touched. Collapsed like `staged_diff`, so the same change
+/// hashes the same way when it is committed.
+pub fn pending_diff(root: &Path) -> Result<String, String> {
+    let index = root.join(ok(root, &["rev-parse", "--git-path", "index"])?.trim());
+    let scratch = std::env::temp_dir().join(crate::util::new_id("reviewers-index"));
+    // A repo with nothing staged yet has no index; `git add` then starts the copy from empty.
+    if index.exists() {
+        std::fs::copy(&index, &scratch).map_err(|error| format!("cannot copy the git index: {error}"))?;
+    }
+    let scratch_text = scratch.display().to_string();
+    let env = [("GIT_INDEX_FILE", scratch_text.as_str())];
+    let diff = (|| {
+        let added = run(root, &["add", "-A"], &env);
+        if !added.ok {
+            return Err(format!("git add -A failed: {}", added.stderr.trim()));
+        }
+        let diff = run(root, &["diff", "--cached", "--no-ext-diff"], &env);
+        if !diff.ok {
+            return Err(format!("git diff --cached failed: {}", diff.stderr.trim()));
+        }
+        let generated = generated_paths(root, &crate::diff::changed_paths(&diff.stdout), &env);
+        Ok(if generated.is_empty() { diff.stdout } else { crate::diff::collapse_generated(&diff.stdout, &generated) })
+    })();
+    let _ = std::fs::remove_file(&scratch);
+    diff
+}
+
 /// Collapsed the way `staged_diff` collapses it, so a commit's diff hashes like the review of it.
 pub fn commit_diff(root: &Path, reference: &str) -> Result<String, String> {
     ok(root, &["show", "--format=", "--no-ext-diff", reference]).map(|diff| without_generated(root, &diff))
@@ -132,18 +160,19 @@ pub fn commit_diff(root: &Path, reference: &str) -> Result<String, String> {
 
 /// The diff with the files `.gitattributes` marks `linguist-generated` collapsed to a line each.
 pub fn without_generated(root: &Path, diff: &str) -> String {
-    let generated = generated_paths(root, &crate::diff::changed_paths(diff));
+    let generated = generated_paths(root, &crate::diff::changed_paths(diff), &[]);
     if generated.is_empty() { diff.to_string() } else { crate::diff::collapse_generated(diff, &generated) }
 }
 
 /// Read from the index, which matches HEAD right after a commit, so the hook and post-commit agree.
 /// Any failure reads as no generated files: the Reviewers then see everything.
-fn generated_paths(root: &Path, paths: &[String]) -> Vec<String> {
+fn generated_paths(root: &Path, paths: &[String], env: &[(&str, &str)]) -> Vec<String> {
     if paths.is_empty() {
         return Vec::new();
     }
     let child = Command::new("git")
         .args(["check-attr", "--cached", "-z", "--stdin", "linguist-generated"])
+        .envs(env.iter().copied())
         .current_dir(root)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -199,6 +228,28 @@ pub fn head_sha(root: &Path) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pending_diff_is_what_add_all_would_stage_and_leaves_the_index_alone() {
+        let repo = std::env::temp_dir().join(crate::util::new_id("pending"));
+        std::fs::create_dir_all(&repo).unwrap();
+        ok(&repo, &["init", "-q"]).unwrap();
+        std::fs::write(repo.join(".gitignore"), "ignored.txt\n").unwrap();
+        std::fs::write(repo.join("tracked.ts"), "export const a = 1;\n").unwrap();
+        ok(&repo, &["add", "."]).unwrap();
+        ok(&repo, &["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "first"]).unwrap();
+        std::fs::write(repo.join("tracked.ts"), "export const a = 2;\n").unwrap();
+        std::fs::write(repo.join("new.ts"), "export const b = 1;\n").unwrap();
+        std::fs::write(repo.join("ignored.txt"), "secret\n").unwrap();
+        let pending = pending_diff(&repo).unwrap();
+        assert!(pending.contains("+export const a = 2;") && pending.contains("+export const b = 1;"), "{pending}");
+        assert!(!pending.contains("secret"));
+        assert!(staged_diff(&repo).unwrap().is_empty(), "the real index was touched");
+        ok(&repo, &["add", "-A"]).unwrap();
+        let staged = staged_diff(&repo).unwrap();
+        let _ = std::fs::remove_dir_all(&repo);
+        assert_eq!(pending, staged);
+    }
 
     #[test]
     fn staged_diff_collapses_files_marked_generated() {

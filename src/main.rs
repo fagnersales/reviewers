@@ -47,6 +47,8 @@ pub enum Command {
     Suggest(commands::suggest::SuggestArgs),
     /// This repo: the Reviewers that judge it and its latest reviews.
     Status(Output),
+    /// Judge the change now, before committing it: what a commit of it would get. Committing the same change afterwards reuses these verdicts.
+    Check(commands::check::CheckArgs),
     /// List Reviewers: this repo's, or every one with --all.
     List {
         /// Every Reviewer, not just the ones judging this repo.
