@@ -13,6 +13,10 @@ You are the one who fixes, adds and tunes Reviewers. The person states rules; yo
 
 A commit that ends "could not reach a verdict" means a Reviewer crashed or timed out, not that the code is wrong. Retry once: only the Reviewers without a verdict run again. If it fails again, tell the person.
 
+## Before committing
+
+`reviewers check` judges the change now, as the commit would: every Reviewer that applies, against what `git add -A && git commit` would commit (`--staged` for only what's staged). It prints the same blocks and exits the way the hook would. A commit of exactly that change afterwards gets the same verdicts back without running, so checking first moves the wait rather than adding to it. Name Reviewers to run only those: `reviewers check "No type casts"`, for example to see whether a fix satisfies the one that blocked. Checks show in `reviewers runs`, marked `check`; `reviewers stats` counts a verdict once, whether a check or a commit reached it.
+
 ## When the person states a rule
 
 "Never cast types", "errors shown to users go through the error map", "dialogs, not pages":

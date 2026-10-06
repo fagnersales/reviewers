@@ -258,7 +258,7 @@ fn write_executable(path: &PathBuf, content: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn project_for(store: &Store, root: &Path) -> Result<Option<Project>, String> {
+pub fn project_for(store: &Store, root: &Path) -> Result<Option<Project>, String> {
     if let Some(project) = store.project_by_root(&root.display().to_string())? {
         return Ok(Some(project));
     }
@@ -267,7 +267,7 @@ fn project_for(store: &Store, root: &Path) -> Result<Option<Project>, String> {
 
 /// Under the global hooks, a repo nobody added still answers to the Reviewers meant for every
 /// repo. It's registered on its first such commit, so its reviews have a place in the history.
-fn adopt(store: &Store, root: &Path) -> Result<Option<Project>, String> {
+pub fn adopt(store: &Store, root: &Path) -> Result<Option<Project>, String> {
     if !store.reviewers()?.iter().any(|reviewer| reviewer.enabled && reviewer.scope == Scope::Everywhere) {
         return Ok(None);
     }
@@ -334,22 +334,8 @@ pub fn commit_msg(message_file: Option<&str>) -> i32 {
     let started_at = crate::util::now_iso();
     let started = Instant::now();
     let classifier = crate::classifier::connected();
-    let judged = review::judge_all(&store, &project, reviewers, &diff, &root, classifier.as_ref(), &mut |judged| match &judged.outcome {
-        Ok(decision) => {
-            let mark = match (decision.verdict, judged.reviewer.blocking) {
-                (crate::store::Verdict::Approved, _) => paint.green("✓"),
-                (_, true) => paint.red("✗"),
-                (_, false) => paint.yellow("✗"),
-            };
-            let cleared = decision.classifier.as_ref().filter(|note| note.outcome == crate::classifier::Outcome::Cleared);
-            let timing = match (&decision.reused_from, cleared) {
-                (Some(run), _) => format!("unchanged since {run}"),
-                (None, Some(note)) => format!("cleared by the classifier · {}", review::percent(note.probability.unwrap_or_default())),
-                (None, None) => crate::util::duration(decision.duration_ms),
-            };
-            eprintln!("  {mark} {} {}", judged.reviewer.name, paint.dim(&timing));
-        }
-        Err(_) => eprintln!("  {} {} {}", paint.yellow("!"), judged.reviewer.name, paint.dim("no verdict")),
+    let judged = review::judge_all(&store, &project, reviewers, &diff, &root, classifier.as_ref(), &mut |judged| {
+        eprintln!("{}", review::terminal::progress(judged, &paint));
     });
     let unavailable = judged.iter().filter_map(|judged| judged.outcome.as_ref().ok()?.classifier.as_ref()?.problem.clone()).next();
     if let Some(problem) = unavailable {

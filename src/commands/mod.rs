@@ -1,3 +1,4 @@
+pub mod check;
 pub mod classifier;
 pub mod onboard;
 pub mod repos;
@@ -48,6 +49,7 @@ pub fn dispatch(command: Option<Command>) -> Outcome {
         Some(Command::Onboard(args)) => onboard::run(args),
         Some(Command::Suggest(args)) => suggest::run(args),
         Some(Command::Status(output)) => runs::status(output.json),
+        Some(Command::Check(args)) => check::run(args),
         Some(Command::List { all, output }) => reviewers::list(all, output.json),
         Some(Command::Show { reviewer, decisions, output }) => reviewers::show(&reviewer, decisions, output.json),
         Some(Command::New(args)) => reviewers::new(args),

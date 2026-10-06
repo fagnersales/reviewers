@@ -13,7 +13,7 @@ fn db_error(error: rusqlite::Error) -> String {
 }
 
 const SCHEMA: &str = include_str!("schema.sql");
-const SCHEMA_VERSION: i64 = 5;
+const SCHEMA_VERSION: i64 = 6;
 
 /// Each step takes a database from the version before it to the next one.
 const MIGRATIONS: &[(i64, &str)] = &[
@@ -30,6 +30,33 @@ const MIGRATIONS: &[(i64, &str)] = &[
     ),
     (4, "ALTER TABLE projects ADD COLUMN ignored INTEGER NOT NULL DEFAULT 0;"),
     (5, "ALTER TABLE decisions ADD COLUMN advisory INTEGER NOT NULL DEFAULT 0;"),
+    // SQLite can't change a CHECK in place, so `runs` is rebuilt to allow the `check` kind.
+    (
+        6,
+        "CREATE TABLE runs_v6 (
+           id TEXT PRIMARY KEY,
+           project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+           kind TEXT NOT NULL CHECK (kind IN ('review', 'check', 'eval')),
+           verdict TEXT NOT NULL CHECK (verdict IN ('approved', 'blocked')),
+           failure TEXT,
+           attempted_message TEXT,
+           diff TEXT NOT NULL,
+           diff_hash TEXT NOT NULL,
+           started_at TEXT NOT NULL,
+           ended_at TEXT NOT NULL,
+           duration_ms INTEGER NOT NULL,
+           commit_sha TEXT,
+           commit_message TEXT,
+           committed_at TEXT,
+           commit_match TEXT
+         );
+         INSERT INTO runs_v6 SELECT id, project_id, kind, verdict, failure, attempted_message, diff, diff_hash, started_at, ended_at, duration_ms,
+           commit_sha, commit_message, committed_at, commit_match FROM runs;
+         DROP TABLE runs;
+         ALTER TABLE runs_v6 RENAME TO runs;
+         CREATE INDEX runs_project_started ON runs(project_id, started_at DESC);
+         CREATE INDEX runs_project_hash ON runs(project_id, diff_hash);",
+    ),
 ];
 
 fn is_false(value: &bool) -> bool {
@@ -79,7 +106,10 @@ impl Scope {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum RunKind {
+    /// The commit hook judging a commit.
     Review,
+    /// `reviewers check`: the same judgement before any commit. Its verdicts are given back to the commit of the same change.
+    Check,
     Eval,
 }
 
@@ -87,7 +117,16 @@ impl RunKind {
     fn as_str(self) -> &'static str {
         match self {
             RunKind::Review => "review",
+            RunKind::Check => "check",
             RunKind::Eval => "eval",
+        }
+    }
+
+    fn parse(text: &str) -> RunKind {
+        match text {
+            "check" => RunKind::Check,
+            "eval" => RunKind::Eval,
+            _ => RunKind::Review,
         }
     }
 }
@@ -393,12 +432,19 @@ impl Store {
                 "this database was written by a newer reviewers (schema {version}); run `reviewers upgrade`"
             ));
         }
-        for (target, statements) in MIGRATIONS.iter().filter(|(target, _)| *target > version) {
+        // Off while a table is rebuilt, or dropping the old `runs` would cascade into `decisions`.
+        // The pragma does nothing inside a transaction, so it wraps them.
+        self.connection.execute_batch("PRAGMA foreign_keys = OFF;").map_err(db_error)?;
+        let migrated = MIGRATIONS.iter().filter(|(target, _)| *target > version).try_for_each(|(target, statements)| {
             self.connection
                 .execute_batch(&format!("BEGIN; {statements} PRAGMA user_version = {target}; COMMIT;"))
-                .map_err(db_error)?;
-        }
-        Ok(())
+                .map_err(|error| {
+                    let _ = self.connection.execute_batch("ROLLBACK;");
+                    db_error(error)
+                })
+        });
+        self.connection.execute_batch("PRAGMA foreign_keys = ON;").map_err(db_error)?;
+        migrated
     }
 
     #[cfg(test)]
@@ -800,13 +846,13 @@ impl Store {
         })
     }
 
-    /// How many commit-hook decisions the classifier cleared, escalated or couldn't answer since a date.
+    /// How many commit-hook and check decisions the classifier cleared, escalated or couldn't answer since a date.
     pub fn classifier_outcomes(&self, since: &str) -> Result<Vec<(String, u64)>> {
         let mut statement = self
             .connection
             .prepare(
                 "SELECT json_extract(d.classifier, '$.outcome') AS outcome, count(*) AS count FROM decisions d JOIN runs r ON r.id = d.run_id
-                 WHERE r.kind = 'review' AND d.classifier IS NOT NULL AND r.started_at >= ?1 GROUP BY outcome",
+                 WHERE r.kind IN ('review', 'check') AND d.classifier IS NOT NULL AND r.started_at >= ?1 GROUP BY outcome",
             )
             .map_err(db_error)?;
         let rows = statement
@@ -831,12 +877,12 @@ impl Store {
         rows.collect::<rusqlite::Result<Vec<_>>>().map_err(db_error)
     }
 
-    /// The latest verdict a commit review in this repo reached on exactly this input.
+    /// The latest verdict a commit review or a check in this repo reached on exactly this input.
     pub fn judged_before(&self, project_id: &str, input_hash: &str) -> Result<Option<Decision>> {
         self.connection
             .query_row(
                 "SELECT d.* FROM decisions d JOIN runs r ON r.id = d.run_id
-                 WHERE r.project_id = ?1 AND r.kind = 'review' AND d.input_hash = ?2
+                 WHERE r.project_id = ?1 AND r.kind IN ('review', 'check') AND d.input_hash = ?2
                  ORDER BY r.started_at DESC LIMIT 1",
                 [project_id, input_hash],
                 |row| Store::decision_row(row, true),
@@ -851,7 +897,7 @@ impl Store {
         Ok(Run {
             id: row.get("id")?,
             project_id: row.get("project_id")?,
-            kind: if kind == "eval" { RunKind::Eval } else { RunKind::Review },
+            kind: RunKind::parse(&kind),
             verdict: Verdict::parse(&verdict).unwrap_or(Verdict::Blocked),
             failure: row.get("failure")?,
             attempted_message: row.get("attempted_message")?,
@@ -891,7 +937,7 @@ impl Store {
                    (SELECT group_concat(d.reviewer_name, char(31)) FROM decisions d WHERE d.run_id = r.id AND d.verdict = 'blocked') AS blocked_by,
                    (SELECT coalesce(sum(d.tokens_read + d.tokens_written), 0) FROM decisions d WHERE d.run_id = r.id) AS tokens
                  FROM runs r JOIN projects p ON p.id = r.project_id
-                 WHERE (?1 IS NULL OR r.project_id = ?1) AND (?2 OR r.kind = 'review')
+                 WHERE (?1 IS NULL OR r.project_id = ?1) AND (?2 OR r.kind != 'eval')
                  ORDER BY r.started_at DESC LIMIT ?3",
             )
             .map_err(db_error)?;
@@ -903,7 +949,7 @@ impl Store {
                 Ok(RunSummary {
                     id: row.get("id")?,
                     project: row.get("project")?,
-                    kind: if kind == "eval" { RunKind::Eval } else { RunKind::Review },
+                    kind: RunKind::parse(&kind),
                     verdict: Verdict::parse(&verdict).unwrap_or(Verdict::Blocked),
                     failure: row.get("failure")?,
                     attempted_message: row.get("attempted_message")?,
@@ -924,7 +970,7 @@ impl Store {
             .connection
             .prepare(
                 "SELECT d.*, r.started_at AS run_started, r.commit_sha AS run_commit FROM decisions d JOIN runs r ON r.id = d.run_id
-                 WHERE d.reviewer_id = ?1 AND r.kind = 'review' AND (?2 IS NULL OR d.verdict = ?2)
+                 WHERE d.reviewer_id = ?1 AND r.kind IN ('review', 'check') AND (?2 IS NULL OR d.verdict = ?2)
                  ORDER BY r.started_at DESC LIMIT ?3",
             )
             .map_err(db_error)?;
@@ -936,7 +982,8 @@ impl Store {
         rows.collect::<rusqlite::Result<Vec<_>>>().map_err(db_error)
     }
 
-    /// Commit-hook runs only, per Reviewer, counting only verdicts that ran (not ones given back for the same input).
+    /// Commit reviews and checks, per Reviewer, counting only verdicts that ran (not ones given back for the same input),
+    /// so a block a check caught counts once and the commit that reused it adds nothing.
     pub fn reviewer_records(&self, project_id: Option<&str>, since: Option<&str>) -> Result<Vec<ReviewerRecord>> {
         let mut statement = self
             .connection
@@ -946,7 +993,7 @@ impl Store {
                    count(*) AS runs, sum(d.verdict = 'blocked') AS blocked, avg(d.duration_ms) AS avg_ms,
                    sum(d.tokens_read) AS tokens_read, sum(d.tokens_written) AS tokens_written
                  FROM decisions d JOIN runs r ON r.id = d.run_id
-                 WHERE r.kind = 'review' AND d.reused_from IS NULL AND (?1 IS NULL OR r.project_id = ?1) AND (?2 IS NULL OR r.started_at >= ?2)
+                 WHERE r.kind IN ('review', 'check') AND d.reused_from IS NULL AND (?1 IS NULL OR r.project_id = ?1) AND (?2 IS NULL OR r.started_at >= ?2)
                  GROUP BY d.reviewer_id ORDER BY tokens_read + tokens_written DESC",
             )
             .map_err(db_error)?;

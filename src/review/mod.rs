@@ -383,6 +383,29 @@ mod tests {
     }
 
     #[test]
+    fn a_commit_gets_the_check_of_the_same_change_back() {
+        let (mut store, project, reviewer, directory) = fixture();
+        let model = resolve_model(&store, &project, &reviewer);
+        let prepared = prepare(&reviewer, model.as_deref(), &project.name, DIFF, &directory);
+        let check = record(&mut store, &project, RunKind::Check, vec![Judged { reviewer: reviewer.clone(), outcome: Ok(judged_block(&reviewer, prepared.input_hash.clone())) }], DIFF, None, now_iso(), Instant::now()).unwrap();
+        assert_eq!(check.exit_code, EXIT_BLOCKED);
+        assert!(store.judged_before(&project.id, &prepared.input_hash).unwrap().is_some());
+
+        let judged = judge_all(&store, &project, vec![reviewer.clone()], DIFF, &directory, None, &mut |_| {});
+        let decision = judged.into_iter().next().unwrap().outcome.unwrap();
+        assert_eq!(decision.reused_from.as_deref(), Some(check.run.id.as_str()));
+        record(&mut store, &project, RunKind::Review, vec![Judged { reviewer: reviewer.clone(), outcome: Ok(decision) }], DIFF, None, now_iso(), Instant::now()).unwrap();
+
+        // The check's judgement counts once; only the commit counts as a commit.
+        assert_eq!(store.reviewer_records(Some(&project.id), None).unwrap()[0].runs, 1);
+        assert_eq!(store.run_outcomes(Some(&project.id), None).unwrap().len(), 1);
+        let kinds: Vec<RunKind> = store.run_summaries(Some(&project.id), false, 10).unwrap().into_iter().map(|run| run.kind).collect();
+        assert_eq!(kinds.len(), 2);
+        assert!(kinds.contains(&RunKind::Check) && kinds.contains(&RunKind::Review));
+        let _ = std::fs::remove_dir_all(&directory);
+    }
+
+    #[test]
     fn an_unchanged_input_gets_its_verdict_back_without_running() {
         let (mut store, project, reviewer, directory) = fixture();
         let model = resolve_model(&store, &project, &reviewer);
