@@ -50,6 +50,20 @@ pub fn matches(patterns: &[String], files: &[String]) -> bool {
     patterns.is_empty() || files.iter().any(|file| patterns.iter().any(|pattern| matches_pattern(pattern, file)))
 }
 
+/// Prose files, which don't start Reviewers unless a Reviewer reads text files. `reviewers text-files` changes it.
+pub const DEFAULT_TEXT_FILES: &str = "**/*.{md,mdx,markdown,txt,rst,adoc}";
+
+pub fn is_text(file: &str, text_globs: &[String]) -> bool {
+    text_globs.iter().any(|pattern| matches_pattern(pattern, file))
+}
+
+/// Whether a Reviewer judges a change: its paths must match a file that counts, and text files
+/// count only for a Reviewer that reads them.
+pub fn applies(patterns: &[String], reads_text: bool, files: &[String], text_globs: &[String]) -> bool {
+    let counted: Vec<String> = files.iter().filter(|file| reads_text || !is_text(file, text_globs)).cloned().collect();
+    !counted.is_empty() && matches(patterns, &counted)
+}
+
 /// `convex/**, shared/**` or `none`, as typed on the command line. Commas inside `{a,b}` belong to the glob.
 pub fn parse_list(text: &str) -> Vec<String> {
     if text.trim() == "none" {
@@ -92,5 +106,25 @@ mod tests {
         assert!(!matches(&scope, &files(&["lib/util.ts", "convex/coupons/rules.ts"])));
         assert!(matches(&[], &files(&["anything"])));
         assert!(matches(&parse_list("{app,components}/**"), &files(&["components/x.tsx"])));
+    }
+
+    #[test]
+    fn text_files_start_only_reviewers_that_read_them() {
+        let text_globs = parse_list(DEFAULT_TEXT_FILES);
+        let docs = files(&["README.md", "docs/guide.txt"]);
+        let mixed = files(&["README.md", "src/main.rs"]);
+        assert!(!applies(&[], false, &docs, &text_globs));
+        assert!(applies(&[], false, &mixed, &text_globs));
+        assert!(applies(&[], true, &docs, &text_globs));
+        assert!(!applies(&parse_list("docs/**"), false, &files(&["docs/guide.md", "src/main.rs"]), &text_globs));
+        assert!(applies(&parse_list("docs/**"), true, &files(&["docs/guide.md"]), &text_globs));
+        assert!(applies(&parse_list("src/**"), false, &mixed, &text_globs));
+    }
+
+    #[test]
+    fn no_text_globs_is_the_old_behavior() {
+        let off = parse_list("none");
+        assert!(applies(&[], false, &files(&["README.md"]), &off));
+        assert!(!applies(&[], false, &[], &off));
     }
 }

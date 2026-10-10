@@ -1,7 +1,7 @@
 use super::{Outcome, cwd, print_json, project_here};
 use crate::hooks::{self, HookState};
 use crate::store::Store;
-use crate::{git, ui};
+use crate::{git, scope, ui};
 use clap::Subcommand;
 use serde_json::json;
 use std::path::{Path, PathBuf};
@@ -207,6 +207,37 @@ pub fn model(model: Option<String>, repo: bool) -> Outcome {
             println!("Default model: {}", value.unwrap_or("Claude Code's own default"));
         }
         None => println!("{}", store.setting("default_model")?.unwrap_or_else(|| "Claude Code's own default".into())),
+    }
+    Ok(0)
+}
+
+pub fn text_files(globs: Option<String>, json: bool) -> Outcome {
+    let store = Store::open_default()?;
+    match globs.as_deref().map(str::trim) {
+        Some("default") => {
+            store.set_setting("text_files", None)?;
+            println!("Text files are back to the default: {}.", scope::DEFAULT_TEXT_FILES);
+        }
+        Some("none") => {
+            store.set_setting("text_files", Some("none"))?;
+            println!("No file counts as text now: a change to Markdown starts Reviewers like any other.");
+        }
+        Some(list) if !scope::parse_list(list).is_empty() => {
+            store.set_setting("text_files", Some(list))?;
+            println!("Text files: {}.", scope::parse_list(list).join(", "));
+        }
+        Some(_) => return Err("give globs like `**/*.md,docs/**`, `none` or `default`".into()),
+        None => {
+            let globs = store.text_globs()?;
+            if json {
+                return print_json(&json!({ "globs": globs, "default": store.setting("text_files")?.is_none() }));
+            }
+            match (globs.is_empty(), store.setting("text_files")?.is_none()) {
+                (true, _) => println!("(none: no file counts as text)"),
+                (false, true) => println!("{} (the default)", globs.join(", ")),
+                (false, false) => println!("{}", globs.join(", ")),
+            }
+        }
     }
     Ok(0)
 }

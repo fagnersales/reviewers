@@ -58,8 +58,8 @@ fn codex_onboards_both_transcripts_then_reviews_and_evaluates() {
     workspace.run("git", &["init", "-q"]);
     workspace.run("git", &["config", "user.name", "Test"]);
     workspace.run("git", &["config", "user.email", "test@example.invalid"]);
-    fs::write(workspace.0.join("repo/example.txt"), "initial\n").unwrap();
-    workspace.run("git", &["add", "example.txt"]);
+    fs::write(workspace.0.join("repo/example.ts"), "initial\n").unwrap();
+    workspace.run("git", &["add", "example.ts"]);
     workspace.run("git", &["-c", "core.hooksPath=/dev/null", "commit", "-qm", "Initial"]);
 
     let mock = r#"#!/bin/sh
@@ -75,7 +75,7 @@ case "$prompt" in
   *) answer='{"verdict":"approved","summary":"Valid input","reasoning":"No unvalidated input added.","evidence":null}' ;;
 esac
 if [ "$REVIEWERS_TEST_RESULT" = blocked ]; then
-  answer='{"verdict":"blocked","summary":"Unvalidated input","reasoning":"Input is unvalidated.","evidence":[{"file":"example.txt","startLine":1,"endLine":1,"excerpt":"validated","explanation":"Validate first"}]}'
+  answer='{"verdict":"blocked","summary":"Unvalidated input","reasoning":"Input is unvalidated.","evidence":[{"file":"example.ts","startLine":1,"endLine":1,"excerpt":"validated","explanation":"Validate first"}]}'
 fi
 # Encode the answer as the string field of a JSONL agent_message.
 escaped=$(printf '%s' "$answer" | sed 's/"/\\"/g')
@@ -112,8 +112,8 @@ printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":50,"cached_input
         calls.lines().all(|line| line.contains("--sandbox read-only") && line.contains("--ephemeral") && line.contains("--output-schema") && line.contains("--model test-model"))
     );
 
-    fs::write(root.join("example.txt"), "validated\n").unwrap();
-    workspace.run("git", &["add", "example.txt"]);
+    fs::write(root.join("example.ts"), "validated\n").unwrap();
+    workspace.run("git", &["add", "example.ts"]);
     workspace.cli(&["hook", "commit-msg"]);
     workspace.cli(&["hook", "commit-msg"]);
     assert_eq!(fs::read_to_string(workspace.0.join("calls")).unwrap().lines().count(), 3, "unchanged reviews should reuse the verdict");
@@ -134,4 +134,21 @@ printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":50,"cached_input
             workspace.command(env!("CARGO_BIN_EXE_reviewers")).args(["hook", "commit-msg"]).env("REVIEWERS_TEST_RESULT", result).env("REVIEWERS_FRESH", "1").output().unwrap();
         assert_eq!(output.status.code(), Some(code), "{}", String::from_utf8_lossy(&output.stdout));
     }
+
+    assert!(workspace.cli(&["text-files"]).contains("(the default)"));
+    workspace.cli(&["text-files", "docs/**,**/*.md"]);
+    assert_eq!(workspace.cli(&["text-files"]).trim(), "docs/**, **/*.md");
+    assert!(workspace.cli(&["text-files", "none"]).contains("No file counts as text"));
+    workspace.cli(&["text-files", "default"]);
+    workspace.run("git", &["restore", "--staged", "example.ts"]);
+    fs::write(root.join("NOTES.md"), "docs\n").unwrap();
+    workspace.run("git", &["add", "NOTES.md"]);
+    let calls_before = fs::read_to_string(workspace.0.join("calls")).unwrap().lines().count();
+    let output = workspace.command(env!("CARGO_BIN_EXE_reviewers")).args(["hook", "commit-msg"]).env("REVIEWERS_FRESH", "1").output().unwrap();
+    assert_eq!(output.status.code(), Some(0));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("only text files changed"));
+    assert_eq!(fs::read_to_string(workspace.0.join("calls")).unwrap().lines().count(), calls_before, "a docs-only commit starts no session");
+    workspace.cli(&["edit", "validate-input", "--reads-text"]);
+    workspace.cli(&["hook", "commit-msg"]);
+    assert_eq!(fs::read_to_string(workspace.0.join("calls")).unwrap().lines().count(), calls_before + 1, "a Reviewer that reads text files still judges it");
 }

@@ -25,4 +25,4 @@ Name cases for the situation, not the verdict. A good set has both kinds, and th
 
 `--only <text>` re-runs the matching cases while iterating. `reviewers evals <reviewer>` lists past batches by version.
 
-A case that comes back `not run` fell outside the Reviewer's `--paths`, so it was never judged. It fails whatever it expected: an approval nobody gave proves nothing. Widen the paths, or remove the case if it no longer belongs to this Reviewer.
+A case that comes back `not run` fell outside the Reviewer's `--paths`, or holds only text files it doesn't read (`--reads-text`), so it was never judged. It fails whatever it expected: an approval nobody gave proves nothing. Widen the paths, or remove the case if it no longer belongs to this Reviewer.

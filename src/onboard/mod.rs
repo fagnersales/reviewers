@@ -743,6 +743,7 @@ fn save(store: &Store, picks: &[(&Suggestion, bool)], roots: &HashMap<String, Pa
             context_files: Vec::new(),
             enabled: *enabled,
             blocking: true,
+            reads_text: false,
             model: None,
             classifier: ClassifierUse::Default,
             origin: json!({ "kind": kind, "why": suggestion.why, "timesSeen": suggestion.times_seen, "evidence": suggestion.evidence, "run": run_directory }),

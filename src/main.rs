@@ -176,6 +176,13 @@ pub enum Command {
         #[arg(value_parser = ["all", "project", "default"])]
         context: Option<String>,
     },
+    /// Show or set which files count as text (Markdown and the like). A change to only text files starts no Reviewer, except those made with `--reads-text`.
+    TextFiles {
+        /// Comma-separated globs like `--paths`, `none` for no text files, or `default` to go back to the default. Omit to print the current ones.
+        globs: Option<String>,
+        #[command(flatten)]
+        output: Output,
+    },
     /// The classifier: a cheap first pass that skips Reviewers a change can't concern. With no subcommand, the same as `status`.
     Classifier {
         #[command(subcommand)]

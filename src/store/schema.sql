@@ -26,6 +26,7 @@ CREATE TABLE reviewers (
   context_files TEXT NOT NULL DEFAULT '[]',
   enabled INTEGER NOT NULL DEFAULT 1,
   blocking INTEGER NOT NULL DEFAULT 1,
+  reads_text INTEGER NOT NULL DEFAULT 0,
   model TEXT,
   version INTEGER NOT NULL DEFAULT 1,
   origin TEXT NOT NULL DEFAULT '{}',

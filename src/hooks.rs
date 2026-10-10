@@ -1,5 +1,5 @@
 use crate::review::{self, EXIT_APPROVED, EXIT_FAILED};
-use crate::store::{Project, RunKind, Scope, Store};
+use crate::store::{Project, Reviewer, RunKind, Scope, Store};
 use crate::{diff, git, scope};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
@@ -282,6 +282,19 @@ fn bypassed() -> bool {
     std::env::var("REVIEWERS_BYPASS").is_ok_and(|value| value == "1")
 }
 
+/// Said when no Reviewer runs only because the change is all text files, so the quiet commit isn't a mystery.
+pub fn only_text_notice(judging: &[Reviewer], files: &[String], text_globs: &[String]) -> Option<String> {
+    let all_text = !files.is_empty() && files.iter().all(|file| scope::is_text(file, text_globs));
+    let would_run = judging.iter().any(|reviewer| reviewer.enabled && scope::applies(&reviewer.paths, true, files, text_globs));
+    if !(all_text && would_run) {
+        return None;
+    }
+    let mut kinds: Vec<String> = files.iter().filter_map(|file| file.rsplit_once('.').map(|(_, extension)| format!(".{extension}"))).collect();
+    kinds.sort();
+    kinds.dedup();
+    Some(format!("reviewers: only text files changed ({}), nothing to judge; `reviewers text-files` says which files count", kinds.join(", ")))
+}
+
 /// `commit-msg`: judge the staged change. Exit 0 lets the commit through.
 pub fn commit_msg(message_file: Option<&str>) -> i32 {
     if bypassed() {
@@ -318,14 +331,18 @@ pub fn commit_msg(message_file: Option<&str>) -> i32 {
         return EXIT_APPROVED;
     }
     let files = diff::changed_paths(&diff);
-    let reviewers: Vec<_> = match store.reviewers_for_project(&project.id) {
-        Ok(reviewers) => reviewers.into_iter().filter(|reviewer| reviewer.enabled && scope::matches(&reviewer.paths, &files)).collect(),
+    let (judging, text_globs) = match store.reviewers_for_project(&project.id).and_then(|judging| Ok((judging, store.text_globs()?))) {
+        Ok(found) => found,
         Err(error) => {
             eprintln!("reviewers: {error}");
             return EXIT_FAILED;
         }
     };
+    let reviewers: Vec<_> = judging.iter().filter(|reviewer| reviewer.enabled && scope::applies(&reviewer.paths, reviewer.reads_text, &files, &text_globs)).cloned().collect();
     if reviewers.is_empty() {
+        if let Some(notice) = only_text_notice(&judging, &files, &text_globs) {
+            eprintln!("{}", review::terminal::Paint::for_stderr().dim(&notice));
+        }
         return EXIT_APPROVED;
     }
     let attempted = message_file.and_then(|file| git::attempted_message(&root.join(file)));

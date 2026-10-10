@@ -17,11 +17,14 @@ pub struct CheckArgs {
 }
 
 /// Why a Reviewer that was asked for by name doesn't run on this change.
-fn skipped(reviewer: &Reviewer, files: &[String]) -> Option<String> {
+fn skipped(reviewer: &Reviewer, files: &[String], text_globs: &[String]) -> Option<String> {
     if !reviewer.enabled {
         return Some(format!("{} is off; `reviewers enable` turns it on", reviewer.name));
     }
-    if !scope::matches(&reviewer.paths, files) {
+    if !scope::applies(&reviewer.paths, reviewer.reads_text, files, text_globs) {
+        if files.iter().all(|file| scope::is_text(file, text_globs)) {
+            return Some(format!("{} doesn't run: only text files changed, and it doesn't read them", reviewer.name));
+        }
         return Some(format!("{} doesn't run: the change touches none of {}", reviewer.name, reviewer.paths.join(", ")));
     }
     None
@@ -46,8 +49,9 @@ pub fn run(args: CheckArgs) -> Outcome {
     }
     let files = diff::changed_paths(&diff);
     let judging = store.reviewers_for_project(&project.id)?;
+    let text_globs = store.text_globs()?;
     let reviewers: Vec<Reviewer> = if args.reviewers.is_empty() {
-        judging.into_iter().filter(|reviewer| reviewer.enabled && scope::matches(&reviewer.paths, &files)).collect()
+        judging.iter().filter(|reviewer| reviewer.enabled && scope::applies(&reviewer.paths, reviewer.reads_text, &files, &text_globs)).cloned().collect()
     } else {
         let mut picked: Vec<Reviewer> = Vec::new();
         for handle in &args.reviewers {
@@ -55,7 +59,7 @@ pub fn run(args: CheckArgs) -> Outcome {
             if !judging.iter().any(|candidate| candidate.id == reviewer.id) {
                 return Err(format!("{} doesn't judge {}; `reviewers edit` links it", reviewer.name, project.name));
             }
-            match skipped(&reviewer, &files) {
+            match skipped(&reviewer, &files, &text_globs) {
                 Some(reason) => eprintln!("{}", ui::dim(&format!("reviewers: {reason}"))),
                 None if picked.iter().any(|already| already.id == reviewer.id) => {}
                 None => picked.push(reviewer),
@@ -64,7 +68,10 @@ pub fn run(args: CheckArgs) -> Outcome {
         picked
     };
     if reviewers.is_empty() {
-        println!("No Reviewer runs on this change, so a commit of it goes through.");
+        match hooks::only_text_notice(&judging, &files, &text_globs) {
+            Some(_) => println!("Only text files changed, so no Reviewer runs and a commit of it goes through. `reviewers text-files` says which files count."),
+            None => println!("No Reviewer runs on this change, so a commit of it goes through."),
+        }
         return Ok(0);
     }
     let paint = Paint::for_stderr();

@@ -71,6 +71,7 @@ pub fn dispatch(command: Option<Command>) -> Outcome {
         Some(Command::Hooks(command)) => repos::hooks(command),
         Some(Command::Model { model, repo }) => repos::model(model, repo),
         Some(Command::Context { context }) => onboard::context(context),
+        Some(Command::TextFiles { globs, output }) => repos::text_files(globs, output.json),
         Some(Command::Classifier { command }) => classifier::run(command),
         Some(Command::Skill(command)) => crate::skill::run(command),
         Some(Command::Upgrade(args)) => crate::upgrade::run(args),
