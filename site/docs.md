@@ -1,4 +1,4 @@
-# Reviewers 0.5.0: guide for coding agents
+# Reviewers 0.5.1: guide for coding agents
 
 Reviewers are the person's rules about code, checked on every commit. Each Reviewer is one rule. A git `commit-msg` hook runs every Reviewer that applies to the staged diff, all at once, each as its own read-only Claude Code or Codex session. If any blocks, the commit stops and the hook prints, for each block, the file and lines, what is wrong, and what the code should do instead.
 
@@ -23,8 +23,12 @@ A commit that ends "could not reach a verdict" means a Reviewer crashed or timed
 
 1. Check it isn't already a Reviewer: `reviewers list --all --json`.
 2. Check whether a linter can enforce it (an ESLint rule, a TypeScript flag). If so, propose that instead: it's instant and uses no tokens.
-3. Otherwise write it: `reviewers new --name "…" --instruction "…"` (this repo) or with `--everywhere` (a personal rule for every repo). Add `--paths` when it only concerns part of the repo. `reviewers help writing` covers the instruction.
+3. Otherwise write it: `reviewers new --name "…" --instruction "…"` (this repo) or with `--everywhere` (a personal rule for every repo). Add `--paths` when it only concerns part of the repo, and `--reads-text` when the rule is about prose (Markdown, docs): a change to only text files starts no Reviewer otherwise. `reviewers help writing` covers the instruction.
 4. Give it cases, at least one diff it must block and one it must approve, and run the evals before calling it done (`reviewers help evals`).
+
+## Text files
+
+A commit that only changes text files (Markdown, `.txt` and the like; `reviewers text-files` prints the list and sets it) starts no Reviewer, to save the tokens: the hook approves and says `only text files changed`. A Reviewer made with `--reads-text` still judges them. When a Reviewer about docs or skill files never runs, that is why; `reviewers edit <name> --reads-text` fixes it.
 
 ## When the person rejects something you did
 
@@ -158,6 +162,7 @@ Create a Reviewer
   --classifier <CLASSIFIER>: When the classifier may skip it: `default`, `off`, or a cutoff from 0 to 1
   --disabled: Create it turned off
   --advisory: Report its blocks without stopping the commit
+  --reads-text: Judge text files too (Markdown and the like, `reviewers text-files`), for a Reviewer about prose
 
 ### `reviewers edit`
 
@@ -175,6 +180,8 @@ Change a Reviewer. A new instruction is a new version
   --remove-repo <REMOVE_REPO>: Unlink a repo (path)
   --advisory: Report its blocks without stopping the commit; `--blocking` undoes it. Can't be combined with `--blocking`
   --blocking: Stop the commit when it blocks (the default)
+  --reads-text: Judge text files too (Markdown and the like, `reviewers text-files`); `--skips-text` undoes it. Can't be combined with `--skips-text`
+  --skips-text: Leave text files out again (the default)
   --classifier <CLASSIFIER>: When the classifier may skip it: `default`, `off`, or a cutoff from 0 to 1
 
 ### `reviewers enable`
@@ -327,6 +334,13 @@ Show or set the default context for onboarding and `suggest`: pool evidence from
 
   <CONTEXT>: `all`, `project`, or `default` to clear it. Omit to print the current one; one of `all`, `project`, `default`
 
+### `reviewers text-files`
+
+Show or set which files count as text (Markdown and the like). A change to only text files starts no Reviewer, except those made with `--reads-text`
+
+  <GLOBS>: Comma-separated globs like `--paths`, `none` for no text files, or `default` to go back to the default. Omit to print the current ones
+  --json: Print JSON instead of text, for agents and scripts
+
 ### `reviewers classifier status`
 
 What's connected, the cutoffs, and what it cleared lately
@@ -417,6 +431,7 @@ At most six words, stated as the rule itself: "No type casts", "Errors reach use
 
 - `--everywhere` for the person's habits in any repo (naming, comments, error handling). Without it, the Reviewer judges the repo you're in, or the ones given with `--repo`.
 - `--paths "convex/**,shared/**"` runs it only when the diff touches those files. Scoping keeps every commit fast: a Reviewer that can't apply shouldn't run.
+- `--reads-text` (on `new` or `edit`; `edit --skips-text` undoes it) lets a Reviewer about prose run on text files. See "What a Reviewer sees".
 - `--context-files LAYOUT.md` attaches a file to every review as reference.
 - `--advisory` (on `new` or `edit`) reports its blocks without stopping the commit, while a rule is being tuned; `edit --blocking` makes it enforce again. Its blocks count in its own block rate in `reviewers stats`, but a commit only advisory Reviewers blocked counts as passed.
 
@@ -425,6 +440,8 @@ At most six words, stated as the rule itself: "No type casts", "Errors reach use
 The staged diff, its instruction, and its context files. It can open and search any file in the working tree (unstaged edits included), but can't change anything or run commands. In an eval it sees the case's snapshot instead of the repo.
 
 A file `.gitattributes` marks `linguist-generated` (`convex/_generated/** linguist-generated`) shows in the diff as one line, how many lines it added and removed, never its contents. GitHub collapses the same files in pull requests. A commit that only changes generated files isn't judged.
+
+Text files (`**/*.{md,mdx,markdown,txt,rst,adoc}` unless changed) don't start Reviewers: a commit that only changes docs or skill files runs no session, and the hook says so. A Reviewer judges them only if it was made with `--reads-text`, which a Reviewer about prose needs (a docs style, a changelog format). A commit that changes code and text together still runs the other Reviewers, and the diff they see includes the text files. `reviewers text-files` prints which files count as text; `reviewers text-files "docs/**,**/*.md"` sets them, `none` makes every file count as code, `default` restores the list.
 
 ## Versions
 
@@ -471,7 +488,7 @@ Name cases for the situation, not the verdict. A good set has both kinds, and th
 
 `--only <text>` re-runs the matching cases while iterating. `reviewers evals <reviewer>` lists past batches by version.
 
-A case that comes back `not run` fell outside the Reviewer's `--paths`, so it was never judged. It fails whatever it expected: an approval nobody gave proves nothing. Widen the paths, or remove the case if it no longer belongs to this Reviewer.
+A case that comes back `not run` fell outside the Reviewer's `--paths`, or holds only text files it doesn't read (`--reads-text`), so it was never judged. It fails whatever it expected: an approval nobody gave proves nothing. Widen the paths, or remove the case if it no longer belongs to this Reviewer.
 
 ---
 
@@ -535,7 +552,7 @@ A rule seen only once waits in the same file and is suggested once it comes up a
 
 ## A commit
 
-1. **commit-msg** takes the staged diff and picks every enabled Reviewer that applies: its scope (every repo, or this one) and its `--paths` match the files changed.
+1. **commit-msg** takes the staged diff and picks every enabled Reviewer that applies: its scope (every repo, or this one) and its `--paths` match the files changed. Text files (`reviewers text-files`) count only for Reviewers made with `--reads-text`; a commit that changes nothing else is approved without starting a session.
 2. A Reviewer already asked exactly this (the same diff, and the same name, instruction, model, and context files with the same contents) gets that verdict back without running: committing unchanged code after a block brings the same block back at once. Change the code, or the Reviewer if it's wrong. Only when the person asks for a fresh judgement of the same code: `REVIEWERS_FRESH=1 git commit …`.
 3. With a classifier connected, one quick call clears the Reviewers the change can't concern (`reviewers help classifier`).
 4. The rest run at once, each a read-only Claude Code or Codex session in the repo. Claude uses Read/Grep/Glob; Codex can run read-only shell commands inside its sandbox, with approvals disabled. Neither can edit the repository. The diff it judges is the staged change; files it opens are read from the working tree, unstaged edits included.
