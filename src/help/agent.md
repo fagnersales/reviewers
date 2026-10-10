@@ -23,8 +23,12 @@ A commit that ends "could not reach a verdict" means a Reviewer crashed or timed
 
 1. Check it isn't already a Reviewer: `reviewers list --all --json`.
 2. Check whether a linter can enforce it (an ESLint rule, a TypeScript flag). If so, propose that instead: it's instant and uses no tokens.
-3. Otherwise write it: `reviewers new --name "…" --instruction "…"` (this repo) or with `--everywhere` (a personal rule for every repo). Add `--paths` when it only concerns part of the repo. `reviewers help writing` covers the instruction.
+3. Otherwise write it: `reviewers new --name "…" --instruction "…"` (this repo) or with `--everywhere` (a personal rule for every repo). Add `--paths` when it only concerns part of the repo, and `--reads-text` when the rule is about prose (Markdown, docs): a change to only text files starts no Reviewer otherwise. `reviewers help writing` covers the instruction.
 4. Give it cases, at least one diff it must block and one it must approve, and run the evals before calling it done (`reviewers help evals`).
+
+## Text files
+
+A commit that only changes text files (Markdown, `.txt` and the like; `reviewers text-files` prints the list and sets it) starts no Reviewer, to save the tokens: the hook approves and says `only text files changed`. A Reviewer made with `--reads-text` still judges them. When a Reviewer about docs or skill files never runs, that is why; `reviewers edit <name> --reads-text` fixes it.
 
 ## When the person rejects something you did
 

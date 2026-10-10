@@ -378,14 +378,14 @@ struct CaseResult {
     run_id: Option<String>,
 }
 
-fn judge_case(store: &Mutex<Store>, reviewer: &Reviewer, model: Option<&str>, record_project: Option<&str>, case: Case) -> CaseResult {
+fn judge_case(store: &Mutex<Store>, reviewer: &Reviewer, text_globs: &[String], model: Option<&str>, record_project: Option<&str>, case: Case) -> CaseResult {
     let started = Instant::now();
     let started_at = now_iso();
     let outcome = (|| -> Result<(Option<crate::store::Decision>, String), String> {
         let repo = materialize(&case)?;
         let result = (|| {
             let diff_text = git::staged_diff(&repo)?;
-            if !scope::matches(&reviewer.paths, &diff::changed_paths(&diff_text)) {
+            if !scope::applies(&reviewer.paths, reviewer.reads_text, &diff::changed_paths(&diff_text), text_globs) {
                 return Ok((None, diff_text));
             }
             review::judge(reviewer, model, "eval case", &diff_text, &repo).map(|decision| (Some(decision), diff_text))
@@ -400,7 +400,7 @@ fn judge_case(store: &Mutex<Store>, reviewer: &Reviewer, model: Option<&str>, re
         Ok((None, _)) => CaseResult {
             pass: false,
             actual: "not run".into(),
-            error: Some("the case's files are outside this Reviewer's --paths, so it never judged it".into()),
+            error: Some("the case's files are outside this Reviewer's --paths, or are text files it doesn't read (`reviewers edit --reads-text`), so it never judged it".into()),
             case,
             decision: None,
             duration_ms,
@@ -468,6 +468,7 @@ pub fn eval(args: EvalArgs) -> Outcome {
     if cases.is_empty() {
         return Err(format!("{} has no cases{}; `reviewers help evals` shows how to add them", reviewer.name, if args.only.is_some() { " matching --only" } else { "" }));
     }
+    let text_globs = store.text_globs()?;
     let home_project = reviewer.project_ids.first().and_then(|id| store.project(id).ok().flatten());
     let model = home_project
         .as_ref()
@@ -489,7 +490,7 @@ pub fn eval(args: EvalArgs) -> Outcome {
                     let Some(case) = queue.lock().ok().and_then(|mut queue| queue.pop()) else {
                         break;
                     };
-                    let result = judge_case(&shared, &reviewer, model.as_deref(), record_project.as_deref(), case);
+                    let result = judge_case(&shared, &reviewer, &text_globs, model.as_deref(), record_project.as_deref(), case);
                     if !args.json {
                         print_case(&result);
                     }
@@ -605,6 +606,7 @@ mod tests {
                 context_files: Vec::new(),
                 enabled: true,
                 blocking: true,
+                reads_text: false,
                 model: None,
                 classifier: crate::store::ClassifierUse::Default,
                 origin: json!({}),
@@ -623,7 +625,7 @@ mod tests {
             reviewer_version: reviewer.version,
             created_at: now_iso(),
         };
-        let result = judge_case(&Mutex::new(store), &reviewer, None, None, case);
+        let result = judge_case(&Mutex::new(store), &reviewer, &scope::parse_list(scope::DEFAULT_TEXT_FILES), None, None, case);
         assert!(!result.pass, "an approval nobody gave must not pass");
         assert_eq!(result.actual, "not run");
         assert!(result.decision.is_none());

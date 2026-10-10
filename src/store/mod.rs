@@ -13,7 +13,7 @@ fn db_error(error: rusqlite::Error) -> String {
 }
 
 const SCHEMA: &str = include_str!("schema.sql");
-const SCHEMA_VERSION: i64 = 6;
+const SCHEMA_VERSION: i64 = 7;
 
 /// Each step takes a database from the version before it to the next one.
 const MIGRATIONS: &[(i64, &str)] = &[
@@ -57,6 +57,7 @@ const MIGRATIONS: &[(i64, &str)] = &[
          CREATE INDEX runs_project_started ON runs(project_id, started_at DESC);
          CREATE INDEX runs_project_hash ON runs(project_id, diff_hash);",
     ),
+    (7, "ALTER TABLE reviewers ADD COLUMN reads_text INTEGER NOT NULL DEFAULT 0;"),
 ];
 
 fn is_false(value: &bool) -> bool {
@@ -192,6 +193,8 @@ pub struct Reviewer {
     pub context_files: Vec<String>,
     pub enabled: bool,
     pub blocking: bool,
+    /// Whether text files (`reviewers text-files`) count as changes it judges.
+    pub reads_text: bool,
     pub model: Option<String>,
     pub version: i64,
     pub classifier: ClassifierUse,
@@ -210,6 +213,7 @@ pub struct NewReviewer {
     pub context_files: Vec<String>,
     pub enabled: bool,
     pub blocking: bool,
+    pub reads_text: bool,
     pub model: Option<String>,
     pub classifier: ClassifierUse,
     pub origin: Value,
@@ -223,6 +227,7 @@ pub struct ReviewerChanges {
     pub context_files: Option<Vec<String>>,
     pub model: Option<Option<String>>,
     pub blocking: Option<bool>,
+    pub reads_text: Option<bool>,
     pub scope: Option<Scope>,
     pub classifier: Option<ClassifierUse>,
 }
@@ -547,6 +552,11 @@ impl Store {
             .map_err(db_error)
     }
 
+    /// The globs of the files that don't start Reviewers: the setting, or the default when unset.
+    pub fn text_globs(&self) -> Result<Vec<String>> {
+        Ok(crate::scope::parse_list(&self.setting("text_files")?.unwrap_or_else(|| crate::scope::DEFAULT_TEXT_FILES.to_string())))
+    }
+
     // ── reviewers ─────────────────────────────────────────────────────────
 
     fn reviewer_row(row: &Row) -> rusqlite::Result<Reviewer> {
@@ -563,6 +573,7 @@ impl Store {
             context_files: json_list(row.get("context_files")?),
             enabled: row.get::<_, i64>("enabled")? != 0,
             blocking: row.get::<_, i64>("blocking")? != 0,
+            reads_text: row.get::<_, i64>("reads_text")? != 0,
             model: row.get("model")?,
             version: row.get("version")?,
             classifier: ClassifierUse::parse(&row.get::<_, String>("classifier")?).unwrap_or(ClassifierUse::Default),
@@ -664,8 +675,8 @@ impl Store {
         let slug = self.free_slug(&input.name, None)?;
         self.connection
             .execute(
-                "INSERT INTO reviewers (id, slug, name, instruction, scope, paths, context_files, enabled, blocking, model, version, origin, created_at, updated_at, classifier)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?13, ?9, 1, ?10, ?11, ?11, ?12)",
+                "INSERT INTO reviewers (id, slug, name, instruction, scope, paths, context_files, enabled, blocking, model, version, origin, created_at, updated_at, classifier, reads_text)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?13, ?9, 1, ?10, ?11, ?11, ?12, ?14)",
                 params![
                     id,
                     slug,
@@ -679,7 +690,8 @@ impl Store {
                     to_json(&input.origin),
                     now,
                     input.classifier.as_text(),
-                    input.blocking as i64
+                    input.blocking as i64,
+                    input.reads_text as i64
                 ],
             )
             .map_err(db_error)?;
@@ -702,7 +714,7 @@ impl Store {
         self.connection
             .execute(
                 "UPDATE reviewers SET slug = ?2, name = ?3, instruction = ?4, paths = ?5, context_files = ?6, model = ?7,
-                   blocking = ?8, scope = ?9, version = ?10, updated_at = ?11, classifier = ?12 WHERE id = ?1",
+                   blocking = ?8, scope = ?9, version = ?10, updated_at = ?11, classifier = ?12, reads_text = ?13 WHERE id = ?1",
                 params![
                     id,
                     slug,
@@ -715,7 +727,8 @@ impl Store {
                     scope.as_str(),
                     version,
                     now_iso(),
-                    changes.classifier.unwrap_or(current.classifier).as_text()
+                    changes.classifier.unwrap_or(current.classifier).as_text(),
+                    changes.reads_text.unwrap_or(current.reads_text) as i64
                 ],
             )
             .map_err(db_error)?;
@@ -1245,6 +1258,7 @@ mod tests {
                  ALTER TABLE reviewers DROP COLUMN classifier;
                  ALTER TABLE projects DROP COLUMN ignored;
                  ALTER TABLE decisions DROP COLUMN advisory;
+                 ALTER TABLE reviewers DROP COLUMN reads_text;
                  PRAGMA user_version = 1;",
             )
             .unwrap();
@@ -1255,6 +1269,38 @@ mod tests {
         drop(store);
         // Opening it again is a no-op, not a second migration.
         assert!(Store::open(&path).is_ok());
+        let _ = std::fs::remove_dir_all(&directory);
+    }
+
+    #[test]
+    fn reads_text_round_trips_and_text_files_default() {
+        let directory = std::env::temp_dir().join(new_id("reviewers-test"));
+        let store = Store::open(&directory.join("reviewers.sqlite")).unwrap();
+        let reviewer = store
+            .create_reviewer(NewReviewer {
+                name: "Docs voice".into(),
+                instruction: "Block jargon.".into(),
+                scope: Scope::Everywhere,
+                project_ids: Vec::new(),
+                paths: Vec::new(),
+                context_files: Vec::new(),
+                enabled: true,
+                blocking: true,
+                reads_text: true,
+                model: None,
+                classifier: ClassifierUse::Default,
+                origin: serde_json::json!({}),
+            })
+            .unwrap();
+        assert!(reviewer.reads_text);
+        let changed = store.update_reviewer(&reviewer.id, ReviewerChanges { reads_text: Some(false), ..Default::default() }).unwrap();
+        assert!(!changed.reads_text);
+        assert!(!store.update_reviewer(&reviewer.id, ReviewerChanges::default()).unwrap().reads_text);
+        assert_eq!(store.text_globs().unwrap(), crate::scope::parse_list(crate::scope::DEFAULT_TEXT_FILES));
+        store.set_setting("text_files", Some("none")).unwrap();
+        assert!(store.text_globs().unwrap().is_empty());
+        store.set_setting("text_files", Some("docs/**, *.md")).unwrap();
+        assert_eq!(store.text_globs().unwrap(), vec!["docs/**".to_string(), "*.md".to_string()]);
         let _ = std::fs::remove_dir_all(&directory);
     }
 }

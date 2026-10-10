@@ -18,6 +18,7 @@ At most six words, stated as the rule itself: "No type casts", "Errors reach use
 
 - `--everywhere` for the person's habits in any repo (naming, comments, error handling). Without it, the Reviewer judges the repo you're in, or the ones given with `--repo`.
 - `--paths "convex/**,shared/**"` runs it only when the diff touches those files. Scoping keeps every commit fast: a Reviewer that can't apply shouldn't run.
+- `--reads-text` (on `new` or `edit`; `edit --skips-text` undoes it) lets a Reviewer about prose run on text files. See "What a Reviewer sees".
 - `--context-files LAYOUT.md` attaches a file to every review as reference.
 - `--advisory` (on `new` or `edit`) reports its blocks without stopping the commit, while a rule is being tuned; `edit --blocking` makes it enforce again. Its blocks count in its own block rate in `reviewers stats`, but a commit only advisory Reviewers blocked counts as passed.
 
@@ -26,6 +27,8 @@ At most six words, stated as the rule itself: "No type casts", "Errors reach use
 The staged diff, its instruction, and its context files. It can open and search any file in the working tree (unstaged edits included), but can't change anything or run commands. In an eval it sees the case's snapshot instead of the repo.
 
 A file `.gitattributes` marks `linguist-generated` (`convex/_generated/** linguist-generated`) shows in the diff as one line, how many lines it added and removed, never its contents. GitHub collapses the same files in pull requests. A commit that only changes generated files isn't judged.
+
+Text files (`**/*.{md,mdx,markdown,txt,rst,adoc}` unless changed) don't start Reviewers: a commit that only changes docs or skill files runs no session, and the hook says so. A Reviewer judges them only if it was made with `--reads-text`, which a Reviewer about prose needs (a docs style, a changelog format). A commit that changes code and text together still runs the other Reviewers, and the diff they see includes the text files. `reviewers text-files` prints which files count as text; `reviewers text-files "docs/**,**/*.md"` sets them, `none` makes every file count as code, `default` restores the list.
 
 ## Versions
 

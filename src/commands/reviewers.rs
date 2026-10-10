@@ -37,6 +37,9 @@ pub struct NewArgs {
     /// Report its blocks without stopping the commit.
     #[arg(long)]
     pub advisory: bool,
+    /// Judge text files too (Markdown and the like, `reviewers text-files`), for a Reviewer about prose.
+    #[arg(long)]
+    pub reads_text: bool,
 }
 
 #[derive(Args)]
@@ -76,6 +79,12 @@ pub struct EditArgs {
     /// Stop the commit when it blocks (the default).
     #[arg(long, conflicts_with = "advisory")]
     pub blocking: bool,
+    /// Judge text files too (Markdown and the like, `reviewers text-files`); `--skips-text` undoes it. Can't be combined with `--skips-text`.
+    #[arg(long)]
+    pub reads_text: bool,
+    /// Leave text files out again (the default).
+    #[arg(long, conflicts_with = "reads_text")]
+    pub skips_text: bool,
     /// When the classifier may skip it: `default`, `off`, or a cutoff from 0 to 1.
     #[arg(long, value_parser = classifier_use)]
     pub classifier: Option<ClassifierUse>,
@@ -113,7 +122,7 @@ pub fn list(all: bool, json: bool) -> Outcome {
                 json!({
                     "id": reviewer.id, "slug": reviewer.slug, "name": reviewer.name, "enabled": reviewer.enabled,
                     "scope": reviewer.scope, "repos": reviewer.project_ids.iter().filter_map(|id| projects.iter().find(|p| &p.id == id).map(|p| p.name.clone())).collect::<Vec<_>>(),
-                    "paths": reviewer.paths, "version": reviewer.version, "classifier": reviewer.classifier,
+                    "paths": reviewer.paths, "readsText": reviewer.reads_text, "version": reviewer.version, "classifier": reviewer.classifier,
                     "runs": record.map(|r| r.runs).unwrap_or(0), "blocked": record.map(|r| r.blocked).unwrap_or(0),
                 })
             })
@@ -181,6 +190,9 @@ pub fn show(handle: &str, limit: u32, json: bool) -> Outcome {
         if reviewer.paths.is_empty() { String::new() } else { format!(" · only {}", reviewer.paths.join(", ")) },
         reviewer.model.as_ref().map(|model| format!(" · model {model}")).unwrap_or_default()
     )));
+    if reviewer.reads_text {
+        println!("{}", ui::dim("Reads text files: a change to Markdown and the like starts it"));
+    }
     if crate::classifier::connected().is_some() {
         let setting = match crate::review::classifier_cutoff(&store, &reviewer) {
             Some(cutoff) => format!("Classifier clears it under {}{}", crate::review::percent(cutoff), if reviewer.classifier == ClassifierUse::Default { " (the default)" } else { "" }),
@@ -238,6 +250,7 @@ pub fn new(args: NewArgs) -> Outcome {
         context_files: args.context_files.as_deref().map(scope::parse_list).unwrap_or_default(),
         enabled: !args.disabled,
         blocking: !args.advisory,
+        reads_text: args.reads_text,
         model: args.model,
         classifier: args.classifier.unwrap_or(ClassifierUse::Default),
         origin: json!({ "kind": "manual" }),
@@ -265,6 +278,7 @@ pub fn edit(args: EditArgs) -> Outcome {
             context_files: args.context_files.as_deref().map(scope::parse_list),
             model: args.model.map(|model| (model != "default").then_some(model)),
             blocking: if args.advisory { Some(false) } else if args.blocking { Some(true) } else { None },
+            reads_text: if args.reads_text { Some(true) } else if args.skips_text { Some(false) } else { None },
             scope: scope_change,
             classifier: args.classifier,
         },
