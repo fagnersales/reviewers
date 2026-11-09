@@ -13,7 +13,7 @@ fn db_error(error: rusqlite::Error) -> String {
 }
 
 const SCHEMA: &str = include_str!("schema.sql");
-const SCHEMA_VERSION: i64 = 7;
+const SCHEMA_VERSION: i64 = 8;
 
 /// Each step takes a database from the version before it to the next one.
 const MIGRATIONS: &[(i64, &str)] = &[
@@ -58,6 +58,14 @@ const MIGRATIONS: &[(i64, &str)] = &[
          CREATE INDEX runs_project_hash ON runs(project_id, diff_hash);",
     ),
     (7, "ALTER TABLE reviewers ADD COLUMN reads_text INTEGER NOT NULL DEFAULT 0;"),
+    (
+        8,
+        "CREATE TABLE reviewer_excluded_projects (
+           reviewer_id TEXT NOT NULL REFERENCES reviewers(id) ON DELETE CASCADE,
+           project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+           PRIMARY KEY (reviewer_id, project_id)
+         );",
+    ),
 ];
 
 fn is_false(value: &bool) -> bool {
@@ -188,6 +196,8 @@ pub struct Reviewer {
     pub scope: Scope,
     /// Linked repos; empty for `everywhere`.
     pub project_ids: Vec<String>,
+    /// Repos an `everywhere` Reviewer leaves out; empty for `projects`.
+    pub excluded_project_ids: Vec<String>,
     /// Globs; the Reviewer runs only when the diff touches one. Empty means every diff.
     pub paths: Vec<String>,
     pub context_files: Vec<String>,
@@ -569,6 +579,7 @@ impl Store {
             instruction: row.get("instruction")?,
             scope: if scope == "everywhere" { Scope::Everywhere } else { Scope::Projects },
             project_ids: Vec::new(),
+            excluded_project_ids: Vec::new(),
             paths: json_list(row.get("paths")?),
             context_files: json_list(row.get("context_files")?),
             enabled: row.get::<_, i64>("enabled")? != 0,
@@ -584,13 +595,19 @@ impl Store {
     }
 
     fn with_links(&self, mut reviewers: Vec<Reviewer>) -> Result<Vec<Reviewer>> {
-        let mut statement = self
+        let mut linked = self
             .connection
             .prepare("SELECT project_id FROM reviewer_projects WHERE reviewer_id = ? ORDER BY project_id")
             .map_err(db_error)?;
+        let mut excluded = self
+            .connection
+            .prepare("SELECT project_id FROM reviewer_excluded_projects WHERE reviewer_id = ? ORDER BY project_id")
+            .map_err(db_error)?;
         for reviewer in &mut reviewers {
-            let rows = statement.query_map([&reviewer.id], |row| row.get::<_, String>(0)).map_err(db_error)?;
+            let rows = linked.query_map([&reviewer.id], |row| row.get::<_, String>(0)).map_err(db_error)?;
             reviewer.project_ids = rows.collect::<rusqlite::Result<Vec<_>>>().map_err(db_error)?;
+            let rows = excluded.query_map([&reviewer.id], |row| row.get::<_, String>(0)).map_err(db_error)?;
+            reviewer.excluded_project_ids = rows.collect::<rusqlite::Result<Vec<_>>>().map_err(db_error)?;
         }
         Ok(reviewers)
     }
@@ -602,12 +619,15 @@ impl Store {
         self.with_links(reviewers)
     }
 
-    /// Everything that judges this repo: its own Reviewers and the `everywhere` ones.
+    /// Everything that judges this repo: its own Reviewers and the `everywhere` ones that don't leave it out.
     pub fn reviewers_for_project(&self, project_id: &str) -> Result<Vec<Reviewer>> {
         Ok(self
             .reviewers()?
             .into_iter()
-            .filter(|reviewer| reviewer.scope == Scope::Everywhere || reviewer.project_ids.iter().any(|id| id == project_id))
+            .filter(|reviewer| match reviewer.scope {
+                Scope::Everywhere => !reviewer.excluded_project_ids.iter().any(|id| id == project_id),
+                Scope::Projects => reviewer.project_ids.iter().any(|id| id == project_id),
+            })
             .collect())
     }
 
@@ -732,6 +752,9 @@ impl Store {
                 ],
             )
             .map_err(db_error)?;
+        if scope == Scope::Projects {
+            self.connection.execute("DELETE FROM reviewer_excluded_projects WHERE reviewer_id = ?", [id]).map_err(db_error)?;
+        }
         self.reviewer(id)?.ok_or_else(|| format!("no Reviewer {id}"))
     }
 
@@ -759,6 +782,23 @@ impl Store {
     pub fn unlink(&self, reviewer_id: &str, project_id: &str) -> Result<()> {
         self.connection
             .execute("DELETE FROM reviewer_projects WHERE reviewer_id = ?1 AND project_id = ?2", params![reviewer_id, project_id])
+            .map(|_| ())
+            .map_err(db_error)
+    }
+
+    pub fn exclude(&self, reviewer_id: &str, project_id: &str) -> Result<()> {
+        self.connection
+            .execute(
+                "INSERT OR IGNORE INTO reviewer_excluded_projects (reviewer_id, project_id) VALUES (?1, ?2)",
+                params![reviewer_id, project_id],
+            )
+            .map(|_| ())
+            .map_err(db_error)
+    }
+
+    pub fn include(&self, reviewer_id: &str, project_id: &str) -> Result<()> {
+        self.connection
+            .execute("DELETE FROM reviewer_excluded_projects WHERE reviewer_id = ?1 AND project_id = ?2", params![reviewer_id, project_id])
             .map(|_| ())
             .map_err(db_error)
     }
@@ -1259,6 +1299,7 @@ mod tests {
                  ALTER TABLE projects DROP COLUMN ignored;
                  ALTER TABLE decisions DROP COLUMN advisory;
                  ALTER TABLE reviewers DROP COLUMN reads_text;
+                 DROP TABLE reviewer_excluded_projects;
                  PRAGMA user_version = 1;",
             )
             .unwrap();
@@ -1301,6 +1342,40 @@ mod tests {
         assert!(store.text_globs().unwrap().is_empty());
         store.set_setting("text_files", Some("docs/**, *.md")).unwrap();
         assert_eq!(store.text_globs().unwrap(), vec!["docs/**".to_string(), "*.md".to_string()]);
+        let _ = std::fs::remove_dir_all(&directory);
+    }
+
+    #[test]
+    fn an_everywhere_reviewer_leaves_out_excluded_repos() {
+        let directory = std::env::temp_dir().join(new_id("reviewers-test"));
+        let store = Store::open(&directory.join("reviewers.sqlite")).unwrap();
+        let kept = store.ensure_project("/repos/kept", None).unwrap();
+        let left_out = store.ensure_project("/repos/left-out", None).unwrap();
+        let reviewer = store
+            .create_reviewer(NewReviewer {
+                name: "Plain copy".into(),
+                instruction: "Block slang.".into(),
+                scope: Scope::Everywhere,
+                project_ids: Vec::new(),
+                paths: Vec::new(),
+                context_files: Vec::new(),
+                enabled: true,
+                blocking: true,
+                reads_text: false,
+                model: None,
+                classifier: ClassifierUse::Default,
+                origin: serde_json::json!({}),
+            })
+            .unwrap();
+        let judges = |project: &Project| store.reviewers_for_project(&project.id).unwrap().iter().any(|judging| judging.id == reviewer.id);
+        store.exclude(&reviewer.id, &left_out.id).unwrap();
+        assert!(judges(&kept));
+        assert!(!judges(&left_out));
+        store.include(&reviewer.id, &left_out.id).unwrap();
+        assert!(judges(&left_out));
+        store.exclude(&reviewer.id, &left_out.id).unwrap();
+        let narrowed = store.update_reviewer(&reviewer.id, ReviewerChanges { scope: Some(Scope::Projects), ..Default::default() }).unwrap();
+        assert!(narrowed.excluded_project_ids.is_empty());
         let _ = std::fs::remove_dir_all(&directory);
     }
 }

@@ -73,6 +73,12 @@ pub struct EditArgs {
     /// Unlink a repo (path).
     #[arg(long)]
     pub remove_repo: Vec<std::path::PathBuf>,
+    /// Leave a repo (path) out of a Reviewer that judges every repo; repeat it for several.
+    #[arg(long)]
+    pub exclude_repo: Vec<std::path::PathBuf>,
+    /// Judge a left-out repo (path) again.
+    #[arg(long)]
+    pub include_repo: Vec<std::path::PathBuf>,
     /// Report its blocks without stopping the commit; `--blocking` undoes it. Can't be combined with `--blocking`.
     #[arg(long)]
     pub advisory: bool,
@@ -92,6 +98,19 @@ pub struct EditArgs {
 
 fn classifier_use(text: &str) -> Result<ClassifierUse, String> {
     ClassifierUse::parse(text).ok_or_else(|| "expected `default`, `off`, or a cutoff from 0 to 1".to_string())
+}
+
+fn repo_names(ids: &[String], projects: &[crate::store::Project]) -> Vec<String> {
+    ids.iter().filter_map(|id| projects.iter().find(|project| &project.id == id).map(|project| project.name.clone())).collect()
+}
+
+/// Where it judges, for a line of text: `everywhere`, `everywhere except a, b`, or the linked repos.
+fn place(reviewer: &crate::store::Reviewer, projects: &[crate::store::Project], everywhere: &str) -> String {
+    match reviewer.scope {
+        Scope::Everywhere if reviewer.excluded_project_ids.is_empty() => everywhere.to_string(),
+        Scope::Everywhere => format!("{everywhere} except {}", repo_names(&reviewer.excluded_project_ids, projects).join(", ")),
+        Scope::Projects => repo_names(&reviewer.project_ids, projects).join(", "),
+    }
 }
 
 fn project_ids_for(store: &Store, paths: &[std::path::PathBuf]) -> Result<Vec<String>, String> {
@@ -121,7 +140,8 @@ pub fn list(all: bool, json: bool) -> Outcome {
                 let record = records.iter().find(|record| record.reviewer_id == reviewer.id);
                 json!({
                     "id": reviewer.id, "slug": reviewer.slug, "name": reviewer.name, "enabled": reviewer.enabled,
-                    "scope": reviewer.scope, "repos": reviewer.project_ids.iter().filter_map(|id| projects.iter().find(|p| &p.id == id).map(|p| p.name.clone())).collect::<Vec<_>>(),
+                    "scope": reviewer.scope, "repos": repo_names(&reviewer.project_ids, &projects),
+                    "excludedRepos": repo_names(&reviewer.excluded_project_ids, &projects),
                     "paths": reviewer.paths, "readsText": reviewer.reads_text, "version": reviewer.version, "classifier": reviewer.classifier,
                     "runs": record.map(|r| r.runs).unwrap_or(0), "blocked": record.map(|r| r.blocked).unwrap_or(0),
                 })
@@ -137,15 +157,7 @@ pub fn list(all: bool, json: bool) -> Outcome {
     for reviewer in &reviewers {
         let record = records.iter().find(|record| record.reviewer_id == reviewer.id);
         let mark = if reviewer.enabled { ui::green("●") } else { ui::dim("○") };
-        let place = match reviewer.scope {
-            Scope::Everywhere => "everywhere".to_string(),
-            Scope::Projects => reviewer
-                .project_ids
-                .iter()
-                .filter_map(|id| projects.iter().find(|project| &project.id == id).map(|project| project.name.clone()))
-                .collect::<Vec<_>>()
-                .join(", "),
-        };
+        let place = place(reviewer, &projects, "everywhere");
         let record_text = record.map(|record| format!("{} blocks in {} runs", record.blocked, record.runs)).unwrap_or_else(|| "no runs yet".into());
         let name = ui::pad(&ui::truncate(&reviewer.name, width - 2), width);
         let name = if reviewer.enabled { ui::bold(&name) } else { ui::dim(&name) };
@@ -164,11 +176,11 @@ pub fn show(handle: &str, limit: u32, json: bool) -> Outcome {
     let cases = store.cases(&reviewer.id, false)?;
     let versions = store.reviewer_versions(&reviewer.id)?;
     let projects = store.projects()?;
-    let repos: Vec<String> = reviewer.project_ids.iter().filter_map(|id| projects.iter().find(|project| &project.id == id).map(|project| project.name.clone())).collect();
     if json {
         return print_json(&json!({
             "reviewer": reviewer,
-            "repos": repos,
+            "repos": repo_names(&reviewer.project_ids, &projects),
+            "excludedRepos": repo_names(&reviewer.excluded_project_ids, &projects),
             "record": record,
             "cases": cases.len(),
             "versions": versions.iter().map(|(version, instruction, first, decisions)| json!({
@@ -181,10 +193,7 @@ pub fn show(handle: &str, limit: u32, json: bool) -> Outcome {
         }));
     }
     println!("{} {}", ui::bold(&reviewer.name), ui::dim(&format!("· {} · v{}{}", reviewer.slug, reviewer.version, if reviewer.enabled { "" } else { " · off" })));
-    let place = match reviewer.scope {
-        Scope::Everywhere => "every repo".to_string(),
-        Scope::Projects => repos.join(", "),
-    };
+    let place = place(&reviewer, &projects, "every repo");
     println!("{}", ui::dim(&format!(
         "Judges {place}{}{}",
         if reviewer.paths.is_empty() { String::new() } else { format!(" · only {}", reviewer.paths.join(", ")) },
@@ -269,6 +278,9 @@ pub fn edit(args: EditArgs) -> Outcome {
     } else {
         None
     };
+    if scope_change.unwrap_or(reviewer.scope) == Scope::Projects && !(args.exclude_repo.is_empty() && args.include_repo.is_empty()) {
+        return Err(format!("{} judges only its linked repos: `--remove-repo` unlinks one", reviewer.name).into());
+    }
     let updated = store.update_reviewer(
         &reviewer.id,
         ReviewerChanges {
@@ -288,6 +300,12 @@ pub fn edit(args: EditArgs) -> Outcome {
     }
     for id in project_ids_for(&store, &args.remove_repo)? {
         store.unlink(&updated.id, &id)?;
+    }
+    for id in project_ids_for(&store, &args.exclude_repo)? {
+        store.exclude(&updated.id, &id)?;
+    }
+    for id in project_ids_for(&store, &args.include_repo)? {
+        store.include(&updated.id, &id)?;
     }
     let bumped = if updated.version != reviewer.version { format!(", now v{}", updated.version) } else { String::new() };
     println!("Updated {}{bumped}", ui::bold(&updated.name));
