@@ -1,4 +1,4 @@
-# Reviewers 0.5.1: guide for coding agents
+# Reviewers 0.5.2: guide for coding agents
 
 Reviewers are the person's rules about code, checked on every commit. Each Reviewer is one rule. A git `commit-msg` hook runs every Reviewer that applies to the staged diff, all at once, each as its own read-only Claude Code or Codex session. If any blocks, the commit stops and the hook prints, for each block, the file and lines, what is wrong, and what the code should do instead.
 
@@ -40,7 +40,7 @@ A commit that only changes text files (Markdown, `.txt` and the like; `reviewers
 
 ## When asked how the Reviewers are doing
 
-`reviewers stats --json` (this repo) or `--all`: commits judged, blocks, wait, tokens, and per Reviewer: block rate, time, tokens per catch, and `neverBlocks` for one that hasn't blocked in 50+ runs. A Reviewer that never blocks is a candidate for a lint rule or for turning off. Draw a chart when it helps; the data is all in the JSON.
+`reviewers stats --json` (this repo) or `--all`: commits judged, blocks, wait, tokens, and per Reviewer: block rate, time, tokens per catch, and `neverBlocks` for one that hasn't blocked in 50+ runs. A Reviewer that never blocks is a candidate for a lint rule or for turning off; when it only never blocks in some repos, `reviewers edit <name> --exclude-repo <path>` leaves those out of an everywhere Reviewer. Draw a chart when it helps; the data is all in the JSON.
 
 ## The classifier
 
@@ -178,6 +178,8 @@ Change a Reviewer. A new instruction is a new version
   --repos-only: Judge only linked repos
   --add-repo <ADD_REPO>: Link a repo (path)
   --remove-repo <REMOVE_REPO>: Unlink a repo (path)
+  --exclude-repo <EXCLUDE_REPO>: Leave a repo (path) out of a Reviewer that judges every repo; repeat it for several
+  --include-repo <INCLUDE_REPO>: Judge a left-out repo (path) again
   --advisory: Report its blocks without stopping the commit; `--blocking` undoes it. Can't be combined with `--blocking`
   --blocking: Stop the commit when it blocks (the default)
   --reads-text: Judge text files too (Markdown and the like, `reviewers text-files`); `--skips-text` undoes it. Can't be combined with `--skips-text`
@@ -430,6 +432,7 @@ At most six words, stated as the rule itself: "No type casts", "Errors reach use
 ## Scope
 
 - `--everywhere` for the person's habits in any repo (naming, comments, error handling). Without it, the Reviewer judges the repo you're in, or the ones given with `--repo`.
+- `edit --exclude-repo PATH` leaves one repo out of an `--everywhere` Reviewer, which keeps judging every other repo, new ones included; `--include-repo PATH` judges it again.
 - `--paths "convex/**,shared/**"` runs it only when the diff touches those files. Scoping keeps every commit fast: a Reviewer that can't apply shouldn't run.
 - `--reads-text` (on `new` or `edit`; `edit --skips-text` undoes it) lets a Reviewer about prose run on text files. See "What a Reviewer sees".
 - `--context-files LAYOUT.md` attaches a file to every review as reference.
