@@ -14,8 +14,8 @@ CREATE TABLE projects (
   ignored INTEGER NOT NULL DEFAULT 0
 );
 
--- `everywhere` Reviewers judge every registered repo; `projects` ones only
--- the repos linked in reviewer_projects.
+-- `everywhere` Reviewers judge every registered repo but the ones in
+-- reviewer_excluded_projects; `projects` ones only the repos linked in reviewer_projects.
 CREATE TABLE reviewers (
   id TEXT PRIMARY KEY,
   slug TEXT NOT NULL UNIQUE,
@@ -37,6 +37,12 @@ CREATE TABLE reviewers (
 );
 
 CREATE TABLE reviewer_projects (
+  reviewer_id TEXT NOT NULL REFERENCES reviewers(id) ON DELETE CASCADE,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  PRIMARY KEY (reviewer_id, project_id)
+);
+
+CREATE TABLE reviewer_excluded_projects (
   reviewer_id TEXT NOT NULL REFERENCES reviewers(id) ON DELETE CASCADE,
   project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
   PRIMARY KEY (reviewer_id, project_id)

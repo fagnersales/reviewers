@@ -40,7 +40,7 @@ A commit that only changes text files (Markdown, `.txt` and the like; `reviewers
 
 ## When asked how the Reviewers are doing
 
-`reviewers stats --json` (this repo) or `--all`: commits judged, blocks, wait, tokens, and per Reviewer: block rate, time, tokens per catch, and `neverBlocks` for one that hasn't blocked in 50+ runs. A Reviewer that never blocks is a candidate for a lint rule or for turning off. Draw a chart when it helps; the data is all in the JSON.
+`reviewers stats --json` (this repo) or `--all`: commits judged, blocks, wait, tokens, and per Reviewer: block rate, time, tokens per catch, and `neverBlocks` for one that hasn't blocked in 50+ runs. A Reviewer that never blocks is a candidate for a lint rule or for turning off; when it only never blocks in some repos, `reviewers edit <name> --exclude-repo <path>` leaves those out of an everywhere Reviewer. Draw a chart when it helps; the data is all in the JSON.
 
 ## The classifier
 

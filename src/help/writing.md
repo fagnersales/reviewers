@@ -17,6 +17,7 @@ At most six words, stated as the rule itself: "No type casts", "Errors reach use
 ## Scope
 
 - `--everywhere` for the person's habits in any repo (naming, comments, error handling). Without it, the Reviewer judges the repo you're in, or the ones given with `--repo`.
+- `edit --exclude-repo PATH` leaves one repo out of an `--everywhere` Reviewer, which keeps judging every other repo, new ones included; `--include-repo PATH` judges it again.
 - `--paths "convex/**,shared/**"` runs it only when the diff touches those files. Scoping keeps every commit fast: a Reviewer that can't apply shouldn't run.
 - `--reads-text` (on `new` or `edit`; `edit --skips-text` undoes it) lets a Reviewer about prose run on text files. See "What a Reviewer sees".
 - `--context-files LAYOUT.md` attaches a file to every review as reference.
