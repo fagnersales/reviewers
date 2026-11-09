@@ -20,7 +20,7 @@ jobs:
       matrix:
         include:
           # macOS builds run on Macs, so Apple's linker signs them (an unsigned arm64 binary is killed on launch).
-          - { target: aarch64-apple-darwin, os: macos-14, runs: true, zig: false }
+          - { target: aarch64-apple-darwin, os: macos-15, runs: true, zig: false }
           - { target: x86_64-apple-darwin, os: macos-15-intel, runs: true, zig: false }
           # Linux builds link against glibc 2.17 through zig, so they run on any distribution from the last decade.
           - { target: x86_64-unknown-linux-gnu, os: ubuntu-latest, runs: true, zig: true }
